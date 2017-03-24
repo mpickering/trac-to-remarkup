@@ -2,6 +2,9 @@ module Trac.Writer where
 
 import Data.List
 import Trac.Pretty
+import qualified Data.Map as M
+
+type CommentMap = M.Map (Int, Int) Int
 
 data Inline = Bold Inlines
              | Italic Inlines
@@ -10,7 +13,7 @@ data Inline = Bold Inlines
              | Underlined Inlines
              | Highlighted Inlines
              | ObjectLink Ref
-             | TicketLink Int
+             | TicketLink Int (Maybe Int) -- Potential comment
              | Str String
              | Space
              | ImageLink
@@ -82,6 +85,7 @@ inline (WebLink is url) = brackets (inlines is) <> parens (text url)
 inline (ObjectLink Ref) = empty
 inline (ImageLink) = empty
 inline LineBreak = cr
-inline (TicketLink n) = char 'T' <> text (show n)
+inline (TicketLink n mc) = char 'T' <> text (show n) <>
+                              maybe empty (\n -> char '#' <> text (show n)) mc
 inline _ = empty
 

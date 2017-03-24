@@ -41,6 +41,7 @@ data Inline = Bold Inlines
              | Monospaced String
              | Link String [String]
              | TracLink Int
+             | CommentLink (Maybe Int) Int
              | Anchor
              | Image
              | Comment
@@ -88,6 +89,7 @@ inlineNoNL :: Parser Inline
 inlineNoNL = do
              --getInput >>= traceShowM
              choice [ tracLink
+                    , commentLink
                     , bold
                     , italic
                     , link
@@ -142,6 +144,13 @@ number = read <$> some (oneOf "0123456789")
 
 tracLink :: Parser Inline
 tracLink = try $ TracLink <$> (char '#' *> number)
+
+commentLink :: Parser Inline
+commentLink = do
+  mn <- optional (string "ticket:" *> number <* char '#')
+  c  <- string "comment:" *> number
+  return $ CommentLink mn c
+
 
 blankline = oneOf "\n\r"
 
