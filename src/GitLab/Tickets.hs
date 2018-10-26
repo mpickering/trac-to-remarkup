@@ -126,6 +126,7 @@ data EditIssue
                 , eiUpdateTime  :: Maybe UTCTime
                 , eiWeight      :: Maybe Weight
                 }
+    deriving (Show)
 
 instance ToJSON EditIssue where
     toJSON EditIssue{..} = object
@@ -142,10 +143,11 @@ instance ToJSON EditIssue where
 type EditIssueAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "issues"
+    :> Capture "iid" IssueIid
     :> ReqBody '[JSON] EditIssue
     :> Put '[JSON] IssueResp
 
-editIssue :: AccessToken -> ProjectId -> EditIssue -> ClientM IssueResp
+editIssue :: AccessToken -> ProjectId -> IssueIid -> EditIssue -> ClientM IssueResp
 editIssue = client (Proxy :: Proxy EditIssueAPI) . Just
 
 ----------------------------------------------------------------------

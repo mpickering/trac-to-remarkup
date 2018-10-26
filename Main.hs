@@ -54,7 +54,7 @@ main = do
             let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
             mapM_ (createTicketChanges iid . collapseChanges) groups
             return ()
-    res <- runClientM (mapM_ createTicket' $ take 1 tickets) clientEnv
+    res <- runClientM (mapM_ createTicket' $ take 10 tickets) clientEnv
     print res
     return ()
 
@@ -97,6 +97,8 @@ createTicket t = do
           = throwError e
     deleteIssue gitlabToken project iid `catchError` handle404
     ir <- createIssue gitlabToken project issue
+    --editIssue gitlabToken project iid
+    --    $ EditIssue { eiUpdateTime = Just ticketChangeTime t }
     liftIO $ print ir
     return $ irIid ir
 
@@ -110,7 +112,34 @@ createTicketChanges iid tc = do
         note = CreateIssueNote { cinBody = body
                                , cinCreatedAt = Just $ changeTime tc
                                }
-    createIssueNote gitlabToken project iid note
+    when (isJust $ changeComment tc)
+        $ void $ createIssueNote gitlabToken project iid note
+
+
+    let status = case ticketStatus $ changeFields tc of
+                   Nothing  -> Nothing
+                   Just New -> Just ReopenEvent
+                   Just Assigned -> Just ReopenEvent
+                   Just Patch -> Just ReopenEvent
+                   Just Merge -> Just ReopenEvent
+                   Just Closed -> Just CloseEvent
+                   Just InfoNeeded -> Just ReopenEvent
+                   Just Upstream -> Just ReopenEvent
+
+        notNull :: Maybe Text -> Maybe Text
+        notNull (Just s) | T.null s = Nothing
+        notNull s = s
+
+        edit = EditIssue { eiTitle = notNull $ ticketSummary $ changeFields tc
+                         , eiDescription = ticketDescription $ changeFields tc
+                         , eiMilestoneId = Nothing
+                         , eiLabels = mempty --fieldLabels $ changeFields tc
+                         , eiStatus = status
+                         , eiUpdateTime = Just $ changeTime tc
+                         , eiWeight = prioToWeight <$> ticketPriority (changeFields tc)
+                         }
+    liftIO $ print edit
+    editIssue gitlabToken project iid edit
     return ()
 
 -- | Maps Trac keywords to labels
