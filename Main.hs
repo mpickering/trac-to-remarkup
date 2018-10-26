@@ -126,16 +126,17 @@ createTicket milestoneMap t = do
 createTicketChanges :: MilestoneMap -> IssueIid -> TicketChange -> ClientM ()
 createTicketChanges milestoneMap iid tc = do
     let body = T.unlines
-            [ fromMaybe mempty (changeComment tc)
+            [ tracToMarkdown ticketNumber $ fromMaybe mempty $ changeComment tc
             , ""
             , fieldsTable [("User", changeAuthor tc)] (changeFields tc)
             ]
         note = CreateIssueNote { cinBody = body
                                , cinCreatedAt = Just $ changeTime tc
                                }
+        ticketNumber = case iid of IssueIid n -> TicketNumber $ fromIntegral n
+
     when (isJust $ changeComment tc)
         $ void $ createIssueNote gitlabToken project iid note
-
 
     let status = case ticketStatus $ changeFields tc of
                    Nothing  -> Nothing
@@ -153,7 +154,7 @@ createTicketChanges milestoneMap iid tc = do
 
         fields = changeFields tc
         edit = EditIssue { eiTitle = notNull $ ticketSummary fields
-                         , eiDescription = ticketDescription fields
+                         , eiDescription = tracToMarkdown ticketNumber <$> ticketDescription fields
                          , eiMilestoneId = fmap (`M.lookup` milestoneMap) (ticketMilestone fields)
                          , eiLabels = Just $ fieldLabels fields
                          , eiStatus = status
