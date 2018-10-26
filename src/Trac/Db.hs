@@ -47,7 +47,6 @@ getTickets conn = do
                   version, summary, milestone,
                   keywords, description, changetime
            FROM ticket
-           LIMIT 1000
           |]
   where
     findOrigField :: FromField a => Text -> TicketNumber -> IO (Maybe a)

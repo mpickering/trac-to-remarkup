@@ -54,14 +54,14 @@ runImport :: Connection -> ClientM ()
 runImport conn = do
     tickets <- liftIO $ Trac.getTickets conn
     --mapM_ print tickets
-    liftIO $ mapM_ (getTicketChanges conn >=> print) $ map ticketNumber tickets
+    --liftIO $ mapM_ (getTicketChanges conn >=> print) $ map ticketNumber tickets
 
     milestones <- liftIO $ Trac.getMilestones conn
     --milestoneMap <- mconcat <$> mapM createMilestone' milestones
     milestoneMap <- foldMap (\(GitLab.Tickets.Milestone a b) -> M.singleton a b)
         <$> listMilestones gitlabToken project
 
-    mapM_ (createTicket' milestoneMap) $ take 10 tickets
+    mapM_ (createTicket' milestoneMap) tickets
   where
     createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
     createMilestone' Trac.Milestone{..} = do

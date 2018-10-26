@@ -12,7 +12,7 @@ convert :: Int -> CommentMap -> String -> String
 convert n cm s =
     writeRemarkup
     $ convertBlocks n cm
-    $ either (const ([R.Para [R.Str "NO PARSE", R.Str s]])) id
+    $ either (\err -> [R.Para [R.Str "NO PARSE: ", R.Str $ show err, R.Str s]]) id
     $ R.parseTrac
     $ s
 
