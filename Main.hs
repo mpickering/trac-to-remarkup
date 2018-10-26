@@ -1,11 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PatternGuards #-}
 
 module Main where
 
 import Control.Monad
+import Control.Monad.Catch
 import Control.Monad.IO.Class
+import Control.Monad.Error.Class
 import Data.Default (def)
 import Data.Foldable
 import Data.Function
@@ -19,6 +23,7 @@ import qualified Data.Text as T
 import Database.PostgreSQL.Simple
 import Network.HTTP.Client.TLS as TLS
 import Network.Connection (TLSSettings(..))
+import Network.HTTP.Types.Status
 import Servant.Client
 
 import GitLab.Tickets
@@ -83,7 +88,12 @@ createTicket t = do
                             , ciCreatedAt = Just $ ticketCreationTime t
                             , ciDescription = Just description
                             }
-    deleteIssue gitlabToken project iid
+    let handle404 (FailureResponse resp)
+          | 404 <- statusCode $ responseStatusCode resp
+          = return ()
+        handle404 e
+          = throwError e
+    deleteIssue gitlabToken project iid `catchError` handle404
     ir <- createIssue gitlabToken project issue
     liftIO $ print ir
     return $ irIid ir

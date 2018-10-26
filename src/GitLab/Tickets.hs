@@ -39,6 +39,17 @@ instance ToJSON Labels where
 newtype IssueIid = IssueIid Int
                  deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
+type GitLabRoot = Header "Private-Token" AccessToken
+
+type GetIssueAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "issues"
+    :> Capture "iid" IssueIid
+    :> Post '[JSON] IssueResp
+
+getIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM IssueResp
+getIssue = client (Proxy :: Proxy GetIssueAPI) . Just
+
 data IssueResp
     = IssueResp { irProjectId :: ProjectId
                 , irIid :: IssueIid
@@ -67,7 +78,6 @@ instance ToJSON CreateIssue where
         , "description" .= ciDescription
         ]
 
-type GitLabRoot = Header "Private-Token" AccessToken
 
 type CreateIssueAPI =
     GitLabRoot :> "projects"

@@ -46,11 +46,14 @@ executable import
   main-is:             Main.hs
   build-depends:       base,
                        text,
+                       mtl,
                        containers,
+                       exceptions,
                        postgresql-simple,
                        trac-to-remarkup,
                        gitlab-servant,
                        servant-client,
+                       http-types,
                        data-default,
                        connection,
                        http-client-tls
