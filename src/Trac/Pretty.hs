@@ -82,7 +82,7 @@ import Data.List (intersperse)
 import Data.String
 import Control.Monad.State
 import Data.Char (isSpace)
-import Data.Monoid ((<>))
+import Data.Semigroup
 
 data RenderState a = RenderState{
          output       :: [a]        -- ^ In reverse order
@@ -107,7 +107,7 @@ data D = Text Int String
        deriving (Show)
 
 newtype Doc = Doc { unDoc :: Seq D }
-              deriving (Monoid, Show)
+              deriving (Semigroup, Monoid, Show)
 
 instance IsString Doc where
   fromString = text
