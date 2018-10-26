@@ -67,6 +67,7 @@ tracToMarkdown (TicketNumber n) src =
 
 createTicket :: Ticket -> ClientM IssueIid
 createTicket t = do
+    liftIO $ print $ ticketNumber t
     let extraRows = [ ("Reporter", ticketCreator t) ]
         description = T.unlines
             [ fieldsTable extraRows fields
@@ -74,13 +75,15 @@ createTicket t = do
             , tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
             ]
         fields = ticketFields t
-        issue = CreateIssue { ciIid = Just $ case ticketNumber t of
-                                               TicketNumber n -> IssueIid $ fromIntegral n
+        iid = case ticketNumber t of
+                TicketNumber n -> IssueIid $ fromIntegral n
+        issue = CreateIssue { ciIid = Just iid
                             , ciTitle = runIdentity $ ticketSummary fields
                             , ciLabels = Just $ fieldLabels $ hoistFields (Just . runIdentity) fields
                             , ciCreatedAt = Just $ ticketCreationTime t
                             , ciDescription = Just description
                             }
+    deleteIssue gitlabToken project iid
     ir <- createIssue gitlabToken project issue
     liftIO $ print ir
     return $ irIid ir

@@ -6,6 +6,7 @@
 
 module GitLab.Tickets where
 
+import Control.Monad
 import qualified Data.Text as T
 import qualified Data.Set as S
 import Data.Text (Text)
@@ -106,3 +107,12 @@ type CreateIssueNoteAPI =
 
 createIssueNote :: AccessToken -> ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueNoteResp
 createIssueNote = client (Proxy :: Proxy CreateIssueNoteAPI) . Just
+
+type DeleteIssueAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "issues"
+    :> Capture "iid" IssueIid
+    :> Delete '[] NoContent
+
+deleteIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM ()
+deleteIssue tok prj iid = void $ client (Proxy :: Proxy DeleteIssueAPI) (Just tok) prj iid
