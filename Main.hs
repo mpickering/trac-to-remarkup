@@ -135,8 +135,10 @@ createTicketChanges milestoneMap iid tc = do
                                }
         ticketNumber = case iid of IssueIid n -> TicketNumber $ fromIntegral n
 
-    when (isJust $ changeComment tc)
-        $ void $ createIssueNote gitlabToken project iid note
+    case changeComment tc of
+      Just c | not $ T.null $ T.strip c ->
+               void $ createIssueNote gitlabToken project iid note
+      _ -> return ()
 
     let status = case ticketStatus $ changeFields tc of
                    Nothing         -> Nothing
