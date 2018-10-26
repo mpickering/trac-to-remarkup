@@ -42,7 +42,7 @@ convertInline n cm (R.Link url is) = WebLink (intersperse Space (map Str is)) ur
 convertInline n cm (R.Str s) = Str s
 convertInline _ _ (R.LineBreak)  = LineBreak
 convertInline _ _ (R.Space)      = Space
-convertInline _ _ (R.TracLink n) = TicketLink n Nothing
+convertInline _ _ (R.TracTicketLink n) = TicketLink n Nothing
 convertInline n cm (R.CommentLink mt c) =
   let ticketN = fromMaybe n mt
   in case M.lookup (ticketN, c) cm of

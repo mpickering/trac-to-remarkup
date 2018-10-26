@@ -40,7 +40,7 @@ data Inline = Bold Inlines
              | WikiStyle Inlines
              | Monospaced String
              | Link String [String]
-             | TracLink Int
+             | TracTicketLink Int
              | CommentLink (Maybe Int) Int
              | Anchor
              | Image
@@ -88,7 +88,7 @@ inline = inlineNoNL <|> endline
 inlineNoNL :: Parser Inline
 inlineNoNL = do
              --getInput >>= traceShowM
-             choice [ tracLink
+             choice [ tracTicketLink
                     , commentLink
                     , bold
                     , italic
@@ -142,8 +142,8 @@ space = Space <$ oneOf " \t"
 number :: Parser Int
 number = read <$> some (oneOf "0123456789")
 
-tracLink :: Parser Inline
-tracLink = try $ TracLink <$> (char '#' *> number)
+tracTicketLink :: Parser Inline
+tracTicketLink = try $ TracTicketLink <$> (char '#' *> number)
 
 commentLink :: Parser Inline
 commentLink = do
