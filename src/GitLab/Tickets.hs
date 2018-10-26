@@ -23,8 +23,11 @@ newtype ProjectId = ProjectId Int
 newtype Labels = Labels (S.Set Text)
                deriving (Semigroup, Monoid, Show)
 
+mkLabel :: Text -> Labels
+mkLabel = Labels . S.singleton
+
 instance IsString Labels where
-    fromString = Labels . S.singleton . T.pack
+    fromString = mkLabel . T.pack
 
 instance ToJSON Labels where
     toJSON (Labels lbls) = toJSON $ T.intercalate "," (S.toList lbls)

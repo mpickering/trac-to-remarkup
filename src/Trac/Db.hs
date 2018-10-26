@@ -47,7 +47,7 @@ getTickets conn = do
                   version, summary, milestone,
                   keywords, description
            FROM ticket
-           LIMIT 1000
+           LIMIT 100000
           |]
   where
     findOrigField :: FromField a => Text -> TicketNumber -> IO (Maybe a)
@@ -105,6 +105,7 @@ getTickets conn = do
         ticketDifferentials <- i . maybe [] parseDifferentials <$> findOrigField "differential" ticketNumber
         ticketTestCase <- i . fromMaybe "" <$> findOrigField "testcase" ticketNumber
         ticketDescription <- i <$> findOrig "description" (fromMaybe "" mb_description)
+        ticketTypeOfFailure <- i . toTypeOfFailure <$> findOrig "failure" ""
         let ticketFields = Fields {..}
         return Ticket {..}
 
@@ -123,7 +124,7 @@ getTicketChanges conn n = do
         case field of
           "type"        -> fieldChange $ emptyFields{ticketType = Just $ toTicketType $ expectJust new}
           "summary"     -> fieldChange $ emptyFields{ticketSummary = Just $ expectJust new}
-          "description" -> fieldChange $ emptyFields{ticketDescription = Just $ expectJust new}
+          "description" -> fieldChange $ emptyFields{ticketDescription = new}
           "priority"    -> fieldChange $ emptyFields{ticketPriority = Just $ toPriority $ expectJust new}
           "status"      -> fieldChange $ emptyFields{ticketStatus = Just $ toStatus $ expectJust new}
 
@@ -153,6 +154,7 @@ toStatus t = case t of
     "closed"     -> Closed
     "infoneeded" -> InfoNeeded
     "upstream"   -> Upstream
+    "reopened"   -> New
     _            -> error $ "unknown status: " ++ show t
 
 toPriority :: Text -> Priority
@@ -172,3 +174,26 @@ toTicketType t = case t of
     "feature request" -> FeatureRequest
     _ -> Bug -- TODO
 
+toTypeOfFailure :: Text -> TypeOfFailure
+toTypeOfFailure t = case t of
+    "Building GHC failed" -> BuildingGhcFailed
+    "Compile-time crash" -> CompileTimeCrash
+    "Compile-time crash or panic" -> CompileTimeCrash
+    "Compile-time performance bug" -> CompileTimePerformance
+    "Debugging information is incorrect" -> IncorrectDebugInformation
+    "Documentation bug" -> DocumentationBug
+    "GHC accepts invalid program" -> InvalidProgramAccepted
+    "GHC doesn't work at all" -> GhcDoesn'tWork
+    "GHCi crash" -> GhciCrash
+    "GHC rejects valid program" -> ValidProgramRejected
+    "Incorrect API annotation" -> IncorrectAPIAnnotation
+    "Incorrect error/warning at compile-time" -> IncorrectWarning
+    "Incorrect result at runtime" -> IncorrectResultAtRuntime
+    "Incorrect warning at compile-time" -> IncorrectWarning
+    "Installing GHC failed" -> InstallationFailure
+    "None/Unknown" -> OtherFailure
+    "Other" -> OtherFailure
+    "Poor/confusing error message" -> PoorErrorMessage
+    "Runtime crash" -> RuntimeCrash
+    "Runtime performance bug" -> RuntimePerformance
+    "" -> OtherFailure
