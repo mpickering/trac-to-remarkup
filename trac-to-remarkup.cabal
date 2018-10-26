@@ -20,7 +20,7 @@ library
   -- other-modules:
   -- other-extensions:,
   build-depends:       base >=4.9 && <4.13,
-                       megaparsec < 6,
+                       megaparsec > 5 && < 6,
                        NoTrace,
                        mtl,
                        text,
@@ -30,11 +30,28 @@ library
   hs-source-dirs:      src
   default-language:    Haskell2010
 
+library gitlab-servant
+  exposed-modules:     GitLab.Tickets
+  build-depends:       base >=4.9 && <4.13,
+                       text,
+                       aeson,
+                       time,
+                       containers,
+                       servant,
+                       servant-client
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+
 executable import
   main-is:             Main.hs
   build-depends:       base,
+                       text,
+                       containers,
                        postgresql-simple,
-                       trac-to-remarkup
+                       trac-to-remarkup,
+                       gitlab-servant,
+                       servant-client,
+                       http-client
 
 Test-Suite test
     default-language:    Haskell2010
