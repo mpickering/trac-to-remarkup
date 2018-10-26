@@ -27,8 +27,8 @@ import Network.HTTP.Types.Status
 import Servant.Client
 
 import GitLab.Tickets
-import Trac.Db
-import Trac.Db.Types
+import Trac.Db as Trac
+import Trac.Db.Types as Trac
 import qualified Trac.Convert
 
 gitlabToken :: AccessToken
@@ -37,26 +37,44 @@ gitlabToken = "eT4mt9KK1CgeYoMo-5Nx"
 project :: ProjectId
 project = ProjectId 1
 
+type MilestoneMap = M.Map Text MilestoneId
+
 main :: IO ()
 main = do
     conn <- connectPostgreSQL ""
-    tickets <- getTickets conn
-    --mapM_ print tickets
-    mapM_ (getTicketChanges conn >=> print) $ map ticketNumber tickets
 
     let tlsSettings = def { settingDisableCertificateValidation = True }
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
     let clientEnv = mkClientEnv mgr (BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4")
 
-    let createTicket' t = do
-            iid <- createTicket t
-            tcs <- liftIO $ getTicketChanges conn (ticketNumber t)
-            let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
-            mapM_ (createTicketChanges iid . collapseChanges) groups
-            return ()
-    res <- runClientM (mapM_ createTicket' $ take 10 tickets) clientEnv
+    res <- runClientM (runImport conn) clientEnv
     print res
-    return ()
+
+runImport :: Connection -> ClientM ()
+runImport conn = do
+    tickets <- liftIO $ Trac.getTickets conn
+    --mapM_ print tickets
+    liftIO $ mapM_ (getTicketChanges conn >=> print) $ map ticketNumber tickets
+
+    milestones <- liftIO $ Trac.getMilestones conn
+    milestoneMap <- mconcat <$> mapM createMilestone' milestones
+    mapM_ (createTicket' milestoneMap) $ take 10 tickets
+  where
+    createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
+    createMilestone' Milestone{..} = do
+        mid <- createMilestone gitlabToken project
+            $ CreateMilestone { cmTitle = mName
+                              , cmDescription = mDescription
+                              , cmDueDate = Just mDue
+                              , cmStartDate = Nothing
+                              }
+        return $ M.singleton mName mid
+
+    createTicket' milestoneMap t = do
+        iid <- createTicket milestoneMap t
+        tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
+        let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
+        mapM_ (createTicketChanges milestoneMap iid . collapseChanges) groups
 
 collapseChanges :: [TicketChange] -> TicketChange
 collapseChanges tcs = TicketChange
@@ -70,8 +88,8 @@ tracToMarkdown :: TicketNumber -> Text -> Text
 tracToMarkdown (TicketNumber n) src =
       T.pack $ Trac.Convert.convert (fromIntegral n) mempty (T.unpack src)
 
-createTicket :: Ticket -> ClientM IssueIid
-createTicket t = do
+createTicket :: MilestoneMap -> Ticket -> ClientM IssueIid
+createTicket milestoneMap t = do
     liftIO $ print $ ticketNumber t
     let extraRows = [ ("Reporter", ticketCreator t) ]
         description = T.unlines
@@ -87,7 +105,7 @@ createTicket t = do
                             , ciLabels = Just $ fieldLabels $ hoistFields (Just . runIdentity) fields
                             , ciCreatedAt = Just $ ticketCreationTime t
                             , ciDescription = Just description
-                            , ciMilestoneId = Nothing
+                            , ciMilestoneId = Just $ M.lookup (runIdentity $ ticketMilestone fields) milestoneMap
                             , ciWeight = Just $ prioToWeight $ runIdentity $ ticketPriority fields
                             }
     let handle404 (FailureResponse resp)
@@ -102,8 +120,8 @@ createTicket t = do
     liftIO $ print ir
     return $ irIid ir
 
-createTicketChanges :: IssueIid -> TicketChange -> ClientM ()
-createTicketChanges iid tc = do
+createTicketChanges :: MilestoneMap -> IssueIid -> TicketChange -> ClientM ()
+createTicketChanges milestoneMap iid tc = do
     let body = T.unlines
             [ fromMaybe mempty (changeComment tc)
             , ""
@@ -130,13 +148,14 @@ createTicketChanges iid tc = do
         notNull (Just s) | T.null s = Nothing
         notNull s = s
 
-        edit = EditIssue { eiTitle = notNull $ ticketSummary $ changeFields tc
-                         , eiDescription = ticketDescription $ changeFields tc
-                         , eiMilestoneId = Nothing
-                         , eiLabels = Just $ fieldLabels $ changeFields tc
+        fields = changeFields tc
+        edit = EditIssue { eiTitle = notNull $ ticketSummary fields
+                         , eiDescription = ticketDescription fields
+                         , eiMilestoneId = fmap (`M.lookup` milestoneMap) (ticketMilestone fields)
+                         , eiLabels = Just $ fieldLabels fields
                          , eiStatus = status
                          , eiUpdateTime = Just $ changeTime tc
-                         , eiWeight = prioToWeight <$> ticketPriority (changeFields tc)
+                         , eiWeight = prioToWeight <$> ticketPriority fields
                          }
     liftIO $ print edit
     when (not $ nullEditIssue edit)

@@ -208,3 +208,39 @@ type DeleteIssueAPI =
 
 deleteIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM ()
 deleteIssue tok prj iid = void $ client (Proxy :: Proxy DeleteIssueAPI) (Just tok) prj iid
+
+----------------------------------------------------------------------
+-- createMilestone
+----------------------------------------------------------------------
+
+type CreateMilestoneAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "milestones"
+    :> ReqBody '[JSON] CreateMilestone
+    :> Post '[JSON] CreateMilestoneResp
+
+data CreateMilestone
+    = CreateMilestone { cmTitle :: Text
+                      , cmDescription :: Text
+                      , cmDueDate :: Maybe UTCTime
+                      , cmStartDate :: Maybe UTCTime
+                      }
+
+instance ToJSON CreateMilestone where
+    toJSON CreateMilestone{..} = object
+        [ "title" .= cmTitle
+        , "description" .= cmDescription
+        , "due_date" .= cmDueDate
+        , "start_date" .= cmStartDate
+        ]
+
+data CreateMilestoneResp = CreateMilestoneResp MilestoneId
+
+instance FromJSON CreateMilestoneResp where
+    parseJSON = withObject "create milestone response" $ \o -> do
+        CreateMilestoneResp <$> o .: "id"
+
+createMilestone :: AccessToken -> ProjectId -> CreateMilestone -> ClientM MilestoneId
+createMilestone tok prj cm = do
+    CreateMilestoneResp mid <- client (Proxy :: Proxy CreateMilestoneAPI) (Just tok) prj cm
+    return mid

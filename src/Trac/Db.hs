@@ -195,3 +195,19 @@ toTypeOfFailure t = case t of
     "Runtime crash" -> RuntimeCrash
     "Runtime performance bug" -> RuntimePerformance
     "" -> OtherFailure
+
+data Milestone = Milestone { mName :: Text
+                           , mDescription :: Text
+                           , mDue :: UTCTime
+                           , mCompleted :: UTCTime
+                           }
+
+getMilestones :: Connection -> IO [Milestone]
+getMilestones conn = do
+    map f <$> query_ conn
+      [sql|SELECT name, due, completed, description
+           FROM milestone
+          |]
+  where
+    f (mName, TracTime mDue, TracTime mCompleted, mDescription) =
+        Milestone {..}
