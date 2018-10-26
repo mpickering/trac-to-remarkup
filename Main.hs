@@ -187,11 +187,12 @@ fieldsTable :: forall f. (Functor f, Foldable f)
             => [(Text, Text)] -> Fields f -> T.Text
 fieldsTable extraRows (Fields{..})
   | null rows = ""
-  | otherwise =
-    T.unlines $
-    [ renderRow header
-    , renderRow (T.replicate (fst widths) "-", T.replicate (snd widths) "-")
-    ] ++ map renderRow rows
+  | otherwise = T.unlines $
+    [ "<details><summary>Trac metadata</summary>"
+    , ""
+    , table
+    , "</details>"
+    ]
   where
     one :: f a -> Maybe a
     one = listToMaybe . toList
@@ -217,6 +218,11 @@ fieldsTable extraRows (Fields{..})
     widths = ( maximum $ map (T.length . fst) (header:rows)
              , maximum $ map (T.length . snd) (header:rows)
              )
+
+    table = T.unlines $
+        [ renderRow header
+        , renderRow (T.replicate (fst widths) "-", T.replicate (snd widths) "-")
+        ] ++ map renderRow rows
 
     renderRow :: (Text, Text) -> Text
     renderRow (a,b) = mconcat
