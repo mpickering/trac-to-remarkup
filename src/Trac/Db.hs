@@ -1,0 +1,174 @@
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE StandaloneDeriving #-}
+
+module Trac.Db where
+
+import Data.Functor.Identity
+import Data.Maybe
+import Data.Time.Clock
+import Data.Time.Clock.POSIX
+import Trac.Db.Types
+import qualified Data.Text as T
+import qualified Data.Text.Read as TR
+import Data.Text (Text)
+import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.FromField
+import Database.PostgreSQL.Simple.ToField
+import Database.PostgreSQL.Simple.SqlQQ
+
+
+deriving instance FromField TicketNumber
+deriving instance ToField TicketNumber
+
+newtype TracTime = TracTime UTCTime
+                 deriving (Eq, Ord, Show)
+
+instance FromField TracTime where
+    fromField field bs = do
+        t <- fromField field bs :: Conversion Integer
+        return $ TracTime $ posixSecondsToUTCTime $ realToFrac t / 1000000
+
+-- N.B. Work around tuple width limit
+type Row =
+    (Integer, Text, TracTime, Text,
+     Text, Text, Text) :.
+    (Maybe Text, Text, Maybe Text,
+     Maybe Text, Maybe Text)
+
+getTickets :: Connection -> IO [Ticket]
+getTickets conn = do
+    mapM toTicket =<< query_ conn
+      [sql|SELECT id, type, time, component,
+                  priority, reporter, status,
+                  version, summary, milestone,
+                  keywords, description
+           FROM ticket
+           LIMIT 1000
+          |]
+  where
+    findOrigField :: FromField a => Text -> TicketNumber -> IO (Maybe a)
+    findOrigField field (TicketNumber n) = do
+        mval <- query conn [sql|SELECT oldvalue
+                                FROM ticket_change
+                                WHERE ticket = ?
+                                AND field = ?
+                                ORDER BY time ASC
+                                LIMIT 1
+                               |]
+                      (n, field)
+        return $ case mval of
+          [] -> Nothing
+          [Only x] -> x
+
+    toTicket :: Row -> IO Ticket
+    toTicket ((n, typ, TracTime time, component,
+               prio, reporter, status) :.
+              (mb_version, summary, mb_milestone,
+               mb_keywords, mb_description))
+      = do
+        let ticketStatus = Identity New
+            ticketNumber = TicketNumber n
+            ticketTime = time
+            ticketCreator = reporter
+            ticketCreationTime = time
+
+        let findOrig :: FromField a => Text -> a -> IO a
+            findOrig field def = fromMaybe def <$> findOrigField field ticketNumber
+
+            parseTicketList :: T.Text -> [TicketNumber]
+            parseTicketList = mapMaybe parseTicketNumber . T.words
+
+            parseTicketNumber :: T.Text -> Maybe TicketNumber
+            parseTicketNumber =
+                either (const Nothing) (Just . TicketNumber . fst) .
+                TR.decimal . T.dropWhile (=='#') . T.strip
+
+            parseDifferentials :: T.Text -> [Differential]
+            parseDifferentials = const [] -- TODO
+
+            i = Identity
+        ticketSummary <- i <$> findOrig "summary" summary
+        ticketComponent <- i <$> findOrig "component" component
+
+        ticketType <- i . toTicketType <$> findOrig "type" typ
+        ticketPriority <- i . toPriority <$> findOrig "priority" prio
+        ticketVersion <- i <$> findOrig "version" (fromMaybe "" mb_version)
+        ticketMilestone <- i <$> findOrig "milestone" (fromMaybe "" mb_milestone)
+        ticketKeywords <- i . T.words <$> findOrig "keywords" (fromMaybe "" mb_keywords)
+        ticketBlockedBy <- i . maybe [] parseTicketList <$> findOrigField "blockedby" ticketNumber
+        ticketRelated <- i . maybe [] parseTicketList <$> findOrigField "related" ticketNumber
+        ticketBlocking <- i . maybe [] parseTicketList <$> findOrigField "blocking" ticketNumber
+        ticketDifferentials <- i . maybe [] parseDifferentials <$> findOrigField "differential" ticketNumber
+        ticketTestCase <- i . fromMaybe "" <$> findOrigField "testcase" ticketNumber
+        ticketDescription <- i <$> findOrig "description" (fromMaybe "" mb_description)
+        let ticketFields = Fields {..}
+        return Ticket {..}
+
+getTicketChanges :: Connection -> TicketNumber -> IO [TicketChange]
+getTicketChanges conn n = do
+    map toChange <$> query conn
+      [sql|SELECT time, author, field, newvalue
+           FROM ticket_change
+           WHERE ticket = ?
+           ORDER BY time ASC
+          |]
+      (Only n)
+  where
+    toChange :: (TracTime, Text, Text, Maybe Text) -> TicketChange
+    toChange (TracTime t, author, field, new) =
+        case field of
+          "type"        -> fieldChange $ emptyFields{ticketType = Just $ toTicketType $ expectJust new}
+          "summary"     -> fieldChange $ emptyFields{ticketSummary = Just $ expectJust new}
+          "description" -> fieldChange $ emptyFields{ticketDescription = Just $ expectJust new}
+          "priority"    -> fieldChange $ emptyFields{ticketPriority = Just $ toPriority $ expectJust new}
+          "status"      -> fieldChange $ emptyFields{ticketStatus = Just $ toStatus $ expectJust new}
+
+          "comment"     -> empty {changeComment = Just $ expectJust new}
+          _             -> empty
+      where
+        expectJust Nothing = error $ unlines [ "expected Just newvalue:"
+                                             , "  t: " <> show t
+                                             , "  field: " <> show field
+                                             , "  newvalue: "<>  show new
+                                             ]
+        expectJust (Just x) = x
+
+        empty = TicketChange { changeTime = t
+                             , changeAuthor = author
+                             , changeFields = emptyFields
+                             , changeComment = Nothing
+                             }
+        fieldChange flds = empty {changeFields = flds}
+
+toStatus :: Text -> Status
+toStatus t = case t of
+    "new"        -> New
+    "assigned"   -> Assigned
+    "patch"      -> Patch
+    "merge"      -> Merge
+    "closed"     -> Closed
+    "infoneeded" -> InfoNeeded
+    "upstream"   -> Upstream
+    _            -> error $ "unknown status: " ++ show t
+
+toPriority :: Text -> Priority
+toPriority t = case t of
+    "lowest"  -> PrioLowest
+    "low"     -> PrioLow
+    "normal"  -> PrioNormal
+    "high"    -> PrioHigh
+    "highest" -> PrioHighest
+    _ -> PrioNormal
+
+toTicketType :: Text -> TicketType
+toTicketType t = case t of
+    "bug"  -> Bug
+    "task" -> Task
+    "merge" -> MergeReq
+    "feature request" -> FeatureRequest
+    _ -> Bug -- TODO
+
