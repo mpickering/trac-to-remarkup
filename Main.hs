@@ -142,7 +142,9 @@ fieldLabels fields =
     failureLbls = maybe mempty typeOfFailureLabels $ ticketTypeOfFailure fields
 
 fieldsTable :: forall f. (Functor f, Foldable f) => Fields f -> T.Text
-fieldsTable (Fields{..}) =
+fieldsTable (Fields{..})
+  | null rows = ""
+  | otherwise =
     T.unlines
     [ renderRow header
     , renderRow (T.replicate (fst widths) "-", T.replicate (snd widths) "-")
