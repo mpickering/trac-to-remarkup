@@ -244,3 +244,22 @@ createMilestone :: AccessToken -> ProjectId -> CreateMilestone -> ClientM Milest
 createMilestone tok prj cm = do
     CreateMilestoneResp mid <- client (Proxy :: Proxy CreateMilestoneAPI) (Just tok) prj cm
     return mid
+
+----------------------------------------------------------------------
+-- listMilestones
+----------------------------------------------------------------------
+
+type ListMilestonesAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "milestones"
+    :> Get '[JSON] [Milestone]
+
+data Milestone = Milestone Text MilestoneId
+
+instance FromJSON Milestone where
+    parseJSON = withObject "milestone" $ \o -> do
+        Milestone <$> o .: "title" <*> o .: "id"
+
+listMilestones :: AccessToken -> ProjectId -> ClientM [Milestone]
+listMilestones tok prj = do
+    client (Proxy :: Proxy ListMilestonesAPI) (Just tok) prj
