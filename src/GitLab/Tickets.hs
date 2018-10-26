@@ -88,12 +88,21 @@ instance ToJSON CreateIssueNote where
         , "created_at" .= cinCreatedAt
         ]
 
+data IssueNoteResp
+    = IssueNoteResp { inrId :: Int
+                    }
+    deriving (Show)
+
+instance FromJSON IssueNoteResp where
+    parseJSON = withObject "issue note response" $ \o ->
+      IssueNoteResp <$> o .: "id"
+
 type CreateIssueNoteAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "issues"
     :> Capture "iid" IssueIid :> "notes"
     :> ReqBody '[JSON] CreateIssueNote
-    :> Post '[JSON] IssueResp
+    :> Post '[JSON] IssueNoteResp
 
-createIssueNote :: Maybe AccessToken -> ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueResp
-createIssueNote = client (Proxy :: Proxy CreateIssueNoteAPI)
+createIssueNote :: AccessToken -> ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueNoteResp
+createIssueNote = client (Proxy :: Proxy CreateIssueNoteAPI) . Just

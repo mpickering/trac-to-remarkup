@@ -8,7 +8,9 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Default (def)
 import Data.Foldable
+import Data.Function
 import Data.Functor.Identity
+import Data.List
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Map as M
@@ -27,6 +29,9 @@ import qualified Trac.Convert
 gitlabToken :: AccessToken
 gitlabToken = "eT4mt9KK1CgeYoMo-5Nx"
 
+project :: ProjectId
+project = ProjectId 1
+
 main :: IO ()
 main = do
     conn <- connectPostgreSQL ""
@@ -37,18 +42,34 @@ main = do
     let tlsSettings = def { settingDisableCertificateValidation = True }
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
     let clientEnv = mkClientEnv mgr (BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4")
-    res <- runClientM (run $ head tickets) clientEnv
+
+    let createTicket' t = do
+            iid <- createTicket t
+            tcs <- liftIO $ getTicketChanges conn (ticketNumber t)
+            let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
+            mapM_ (createTicketChanges iid . collapseChanges) groups
+            return ()
+    res <- runClientM (mapM_ createTicket' $ take 1 tickets) clientEnv
     print res
     return ()
+
+collapseChanges :: [TicketChange] -> TicketChange
+collapseChanges tcs = TicketChange
+    { changeTime = changeTime $ head tcs
+    , changeAuthor = changeAuthor $ head tcs
+    , changeFields = foldl1 collapseFields (map changeFields tcs)
+    , changeComment = listToMaybe $ catMaybes $ map changeComment tcs
+    }
 
 tracToMarkdown :: TicketNumber -> Text -> Text
 tracToMarkdown (TicketNumber n) src =
       T.pack $ Trac.Convert.convert (fromIntegral n) mempty (T.unpack src)
 
-run :: Ticket -> ClientM ()
-run t = do
-    let description = T.unlines
-            [ fieldsTable fields
+createTicket :: Ticket -> ClientM IssueIid
+createTicket t = do
+    let extraRows = [ ("Reporter", ticketCreator t) ]
+        description = T.unlines
+            [ fieldsTable extraRows fields
             , ""
             , tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
             ]
@@ -60,8 +81,21 @@ run t = do
                             , ciCreatedAt = Just $ ticketCreationTime t
                             , ciDescription = Just description
                             }
-    ir <- createIssue gitlabToken (ProjectId 1) issue
+    ir <- createIssue gitlabToken project issue
     liftIO $ print ir
+    return $ irIid ir
+
+createTicketChanges :: IssueIid -> TicketChange -> ClientM ()
+createTicketChanges iid tc = do
+    let body = T.unlines
+            [ fieldsTable [("User", changeAuthor tc)] (changeFields tc)
+            , ""
+            , fromMaybe mempty (changeComment tc)
+            ]
+        note = CreateIssueNote { cinBody = body
+                               , cinCreatedAt = Just $ changeTime tc
+                               }
+    createIssueNote gitlabToken project iid note
     return ()
 
 -- | Maps Trac keywords to labels
@@ -146,14 +180,15 @@ fieldLabels fields =
     failureLbls :: Labels
     failureLbls = maybe mempty typeOfFailureLabels $ ticketTypeOfFailure fields
 
-fieldsTable :: forall f. (Functor f, Foldable f) => Fields f -> T.Text
-fieldsTable (Fields{..})
+fieldsTable :: forall f. (Functor f, Foldable f)
+            => [(Text, Text)] -> Fields f -> T.Text
+fieldsTable extraRows (Fields{..})
   | null rows = ""
   | otherwise =
-    T.unlines
+    T.unlines $
     [ renderRow header
     , renderRow (T.replicate (fst widths) "-", T.replicate (snd widths) "-")
-    ]
+    ] ++ map renderRow rows
   where
     row :: Text -> f Text -> Maybe (Text, Text)
     row name val =
@@ -162,13 +197,13 @@ fieldsTable (Fields{..})
     rows :: [(Text, Text)]
     rows =
         catMaybes
-        [ row "version" ticketVersion
-        , row "test case" ticketTestCase
-        , row "differential revisions" $ fmap renderTicketDifferentials ticketDifferentials
-        ]
+        [ row "Version" ticketVersion
+        , row "Test case" ticketTestCase
+        -- , row "differential revisions" $ fmap renderTicketDifferentials ticketDifferentials
+        ] ++ extraRows
 
     header :: (Text, Text)
-    header = ("field", "value")
+    header = ("Trac field", "Value")
 
     widths = ( maximum $ map (T.length . fst) (header:rows)
              , maximum $ map (T.length . snd) (header:rows)
@@ -183,8 +218,12 @@ fieldsTable (Fields{..})
         , " |"
         ]
 
-renderTicketDifferentials :: [Differential] -> Text
-renderTicketDifferentials _ = ""
+renderTicketDifferentials :: [Differential] -> Maybe Text
+renderTicketDifferentials [] = Nothing
+renderTicketDifferentials diffs = Just $ T.intercalate ", " $ map toLink diffs
+  where
+    toLink (Differential n) =
+        T.pack $ "[D"++show n++"](https://phabricator.haskell.org/D"++show n++")"
 
 toPriorityLabel :: Priority -> Labels
 toPriorityLabel p = case p of

@@ -1,6 +1,9 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Trac.Writer where
 
 import Data.List
+import qualified Data.Text as T
 import Trac.Pretty
 import qualified Data.Map as M
 
@@ -61,9 +64,11 @@ block (Para is)     = inlines is
 block (List s iss)   =
   vcat (map (oneListItem "-") iss)
 block (CodeBlock ml s) =
-  vcat [text "```", mlang, text s, text "```"]
+  vcat [text "```" <> mlang, text s, text "```"]
   where
-    mlang = maybe empty text ml
+    mlang = case ml of
+      Just lang -> text lang
+      Nothing   -> empty
 block Table = undefined
 block HorizontalLine = text "---"
 

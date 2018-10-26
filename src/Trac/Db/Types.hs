@@ -5,6 +5,7 @@
 
 module Trac.Db.Types where
 
+import Control.Applicative
 import Data.Functor.Identity
 import Data.Text (Text)
 import Data.Time.Clock
@@ -71,6 +72,25 @@ emptyFields = Fields
     Nothing Nothing Nothing
     Nothing Nothing Nothing
     Nothing Nothing Nothing
+
+collapseFields :: Fields Maybe -> Fields Maybe -> Fields Maybe
+collapseFields a b =
+    Fields { ticketType = ticketType a <|> ticketType b
+           , ticketSummary = ticketSummary a <|> ticketSummary b
+           , ticketComponent = ticketComponent a <|> ticketComponent b
+           , ticketPriority = ticketPriority a <|> ticketPriority b
+           , ticketVersion = ticketVersion a <|> ticketVersion b
+           , ticketMilestone = ticketMilestone a <|> ticketMilestone b
+           , ticketDescription = ticketDescription a <|> ticketDescription b
+           , ticketTypeOfFailure = ticketTypeOfFailure a <|> ticketTypeOfFailure b
+           , ticketKeywords = ticketKeywords a <|> ticketKeywords b
+           , ticketBlockedBy = ticketBlockedBy a <|> ticketBlockedBy b
+           , ticketRelated = ticketRelated a <|> ticketRelated b
+           , ticketBlocking = ticketBlocking a <|> ticketBlocking b
+           , ticketDifferentials = ticketDifferentials a <|> ticketDifferentials b
+           , ticketTestCase = ticketTestCase a <|> ticketTestCase b
+           , ticketStatus = ticketStatus a <|> ticketStatus b
+           }
 
 deriving instance Show (Fields Identity)
 deriving instance Show (Fields Maybe)
