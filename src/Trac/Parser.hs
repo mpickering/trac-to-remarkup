@@ -186,6 +186,7 @@ header = try $ do
   skipSpaces
   content <- inlines
   bs <- blocks
+  _ <- optional $ skipSpaces >> some (char '=')
   return (Header level content bs)
 
 para :: Parser Block
