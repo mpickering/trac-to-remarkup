@@ -18,14 +18,27 @@ import Data.Time.Clock
 import Servant.API
 import Servant.Client
 
+newtype Weight = Weight Int
+               deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
+
 newtype AccessToken = AccessToken Text
                     deriving (Eq, Ord, Show, ToHttpApiData, IsString)
+
+newtype MilestoneId = MilestoneId Int
+                    deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
 newtype ProjectId = ProjectId Int
                   deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
 newtype Labels = Labels (S.Set Text)
                deriving (Semigroup, Monoid, Show)
+
+data StatusEvent = CloseEvent | ReopenEvent
+                 deriving (Show)
+
+instance ToJSON StatusEvent where
+    toJSON CloseEvent  = "close"
+    toJSON ReopenEvent = "reopen"
 
 mkLabel :: Text -> Labels
 mkLabel = Labels . S.singleton
@@ -41,6 +54,10 @@ newtype IssueIid = IssueIid Int
 
 type GitLabRoot = Header "Private-Token" AccessToken
 
+----------------------------------------------------------------------
+-- getIssue
+----------------------------------------------------------------------
+
 type GetIssueAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "issues"
@@ -49,6 +66,7 @@ type GetIssueAPI =
 
 getIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM IssueResp
 getIssue = client (Proxy :: Proxy GetIssueAPI) . Just
+
 
 data IssueResp
     = IssueResp { irProjectId :: ProjectId
@@ -61,12 +79,18 @@ instance FromJSON IssueResp where
       IssueResp <$> o .: "project_id"
                 <*> o .: "iid"
 
+----------------------------------------------------------------------
+-- createIssue
+----------------------------------------------------------------------
+
 data CreateIssue
     = CreateIssue { ciIid :: Maybe IssueIid
                   , ciTitle :: Text
                   , ciLabels :: Maybe Labels
                   , ciCreatedAt :: Maybe UTCTime
                   , ciDescription :: Maybe Text
+                  , ciMilestoneId :: Maybe (Maybe MilestoneId)
+                  , ciWeight :: Maybe Weight
                   }
 
 instance ToJSON CreateIssue where
@@ -76,8 +100,9 @@ instance ToJSON CreateIssue where
         , "labels" .= ciLabels
         , "created_at" .= ciCreatedAt
         , "description" .= ciDescription
+        , "milestone_id" .= ciMilestoneId
+        , "weight" .= ciWeight
         ]
-
 
 type CreateIssueAPI =
     GitLabRoot :> "projects"
@@ -87,6 +112,45 @@ type CreateIssueAPI =
 
 createIssue :: AccessToken -> ProjectId -> CreateIssue -> ClientM IssueResp
 createIssue = client (Proxy :: Proxy CreateIssueAPI) . Just
+
+----------------------------------------------------------------------
+-- editIssue
+----------------------------------------------------------------------
+
+data EditIssue
+    = EditIssue { eiTitle       :: Maybe Text
+                , eiDescription :: Maybe Text
+                , eiMilestoneId :: Maybe (Maybe MilestoneId)
+                , eiLabels      :: Maybe Labels
+                , eiStatus      :: Maybe StatusEvent
+                , eiUpdateTime  :: Maybe UTCTime
+                , eiWeight      :: Maybe Weight
+                }
+
+instance ToJSON EditIssue where
+    toJSON EditIssue{..} = object
+        [ "title" .= eiTitle
+        , "description" .= eiDescription
+        , "milestone_id" .= eiMilestoneId
+        , "labels" .= eiLabels
+        , "status" .= eiStatus
+        , "updated_at" .= eiUpdateTime
+        , "weight" .= eiWeight
+        ]
+
+
+type EditIssueAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "issues"
+    :> ReqBody '[JSON] EditIssue
+    :> Put '[JSON] IssueResp
+
+editIssue :: AccessToken -> ProjectId -> EditIssue -> ClientM IssueResp
+editIssue = client (Proxy :: Proxy EditIssueAPI) . Just
+
+----------------------------------------------------------------------
+-- createIssueNote
+----------------------------------------------------------------------
 
 data CreateIssueNote
     = CreateIssueNote { cinBody :: Text
@@ -117,6 +181,10 @@ type CreateIssueNoteAPI =
 
 createIssueNote :: AccessToken -> ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueNoteResp
 createIssueNote = client (Proxy :: Proxy CreateIssueNoteAPI) . Just
+
+----------------------------------------------------------------------
+-- deleteIssue
+----------------------------------------------------------------------
 
 type DeleteIssueAPI =
     GitLabRoot :> "projects"

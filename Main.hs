@@ -87,6 +87,8 @@ createTicket t = do
                             , ciLabels = Just $ fieldLabels $ hoistFields (Just . runIdentity) fields
                             , ciCreatedAt = Just $ ticketCreationTime t
                             , ciDescription = Just description
+                            , ciMilestoneId = Nothing
+                            , ciWeight = Just $ prioToWeight $ runIdentity $ ticketPriority fields
                             }
     let handle404 (FailureResponse resp)
           | 404 <- statusCode $ responseStatusCode resp
@@ -257,3 +259,10 @@ toPriorityLabel p = case p of
   PrioNormal  -> "P-normal"
   PrioHigh    -> "P-high"
   PrioHighest -> "P-highest"
+
+prioToWeight :: Priority -> Weight
+prioToWeight PrioLowest  = Weight 0
+prioToWeight PrioLow     = Weight 3
+prioToWeight PrioNormal  = Weight 5
+prioToWeight PrioHigh    = Weight 7
+prioToWeight PrioHighest = Weight 10
