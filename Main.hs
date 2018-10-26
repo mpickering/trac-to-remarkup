@@ -75,9 +75,9 @@ createTicket t = do
     liftIO $ print $ ticketNumber t
     let extraRows = [ ("Reporter", ticketCreator t) ]
         description = T.unlines
-            [ fieldsTable extraRows fields
+            [ tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
             , ""
-            , tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
+            , fieldsTable extraRows fields
             ]
         fields = ticketFields t
         iid = case ticketNumber t of
@@ -101,9 +101,9 @@ createTicket t = do
 createTicketChanges :: IssueIid -> TicketChange -> ClientM ()
 createTicketChanges iid tc = do
     let body = T.unlines
-            [ fieldsTable [("User", changeAuthor tc)] (changeFields tc)
+            [ fromMaybe mempty (changeComment tc)
             , ""
-            , fromMaybe mempty (changeComment tc)
+            , fieldsTable [("User", changeAuthor tc)] (changeFields tc)
             ]
         note = CreateIssueNote { cinBody = body
                                , cinCreatedAt = Just $ changeTime tc
