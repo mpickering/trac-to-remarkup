@@ -54,7 +54,7 @@ equals = char  '='
 
 block :: Block -> Doc
 block (Header n h bs)
-  = repeatP n equals <+> inlines h <+> repeatP n equals $+$ blocks bs
+  = repeatP n (char '#') <+> inlines h $+$ blocks bs
 block (Quote is)    =
   prefixed "> " (blocks is)
 block (Para is)     = inlines is
@@ -63,7 +63,7 @@ block (List s iss)   =
 block (CodeBlock ml s) =
   vcat [text "```", mlang, text s, text "```"]
   where
-    mlang = maybe empty ((text "lang=" <>) . text) ml
+    mlang = maybe empty text ml
 block Table = undefined
 block HorizontalLine = text "---"
 

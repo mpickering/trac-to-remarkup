@@ -22,6 +22,7 @@ import Servant.Client
 import GitLab.Tickets
 import Trac.Db
 import Trac.Db.Types
+import qualified Trac.Convert
 
 gitlabToken :: AccessToken
 gitlabToken = "eT4mt9KK1CgeYoMo-5Nx"
@@ -40,12 +41,16 @@ main = do
     print res
     return ()
 
+tracToMarkdown :: TicketNumber -> Text -> Text
+tracToMarkdown (TicketNumber n) src =
+      T.pack $ Trac.Convert.convert (fromIntegral n) mempty (T.unpack src)
+
 run :: Ticket -> ClientM ()
 run t = do
     let description = T.unlines
             [ fieldsTable fields
             , ""
-            , runIdentity $ ticketDescription (ticketFields t)
+            , tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
             ]
         fields = ticketFields t
         issue = CreateIssue { ciIid = Just $ case ticketNumber t of
