@@ -193,16 +193,22 @@ fieldsTable extraRows (Fields{..})
     , renderRow (T.replicate (fst widths) "-", T.replicate (snd widths) "-")
     ] ++ map renderRow rows
   where
-    row :: Text -> f Text -> Maybe (Text, Text)
-    row name val =
-        listToMaybe $ toList $ fmap (\v -> (name,v)) val
+    one :: f a -> Maybe a
+    one = listToMaybe . toList
+
+    unless :: (a -> Bool) -> Maybe a -> Maybe a
+    unless p (Just x) | p x = Nothing
+    unless _ x = x
+
+    row :: Text -> Maybe Text -> Maybe (Text, Text)
+    row name val = fmap (\v -> (name,v)) val
 
     rows :: [(Text, Text)]
     rows =
         catMaybes
-        [ row "Version" ticketVersion
-        , row "Test case" ticketTestCase
-        -- , row "differential revisions" $ fmap renderTicketDifferentials ticketDifferentials
+        [ row "Version" $ one ticketVersion
+        , row "Test case" $ unless T.null $ one ticketTestCase
+        , row "Differential revisions" $ one ticketDifferentials >>= renderTicketDifferentials
         ] ++ extraRows
 
     header :: (Text, Text)
