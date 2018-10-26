@@ -133,13 +133,14 @@ createTicketChanges iid tc = do
         edit = EditIssue { eiTitle = notNull $ ticketSummary $ changeFields tc
                          , eiDescription = ticketDescription $ changeFields tc
                          , eiMilestoneId = Nothing
-                         , eiLabels = mempty --fieldLabels $ changeFields tc
+                         , eiLabels = Just $ fieldLabels $ changeFields tc
                          , eiStatus = status
                          , eiUpdateTime = Just $ changeTime tc
                          , eiWeight = prioToWeight <$> ticketPriority (changeFields tc)
                          }
     liftIO $ print edit
-    editIssue gitlabToken project iid edit
+    when (not $ nullEditIssue edit)
+        $ void $ editIssue gitlabToken project iid edit
     return ()
 
 -- | Maps Trac keywords to labels

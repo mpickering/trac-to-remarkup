@@ -11,12 +11,18 @@ import qualified Data.Text as T
 import qualified Data.Set as S
 import Data.Text (Text)
 import Data.Semigroup
+import Data.Maybe
 import Data.Aeson
+import Data.Aeson.Types (Pair)
 import Data.Proxy
 import Data.String
 import Data.Time.Clock
 import Servant.API
 import Servant.Client
+
+(.=?) :: ToJSON a => Text -> Maybe a -> Maybe Pair
+key .=? Nothing = Nothing
+key .=? Just x = Just $ key .= toJSON x
 
 newtype Weight = Weight Int
                deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
@@ -130,15 +136,15 @@ data EditIssue
 
 instance ToJSON EditIssue where
     toJSON EditIssue{..} = object
-        [ "title" .= eiTitle
-        , "description" .= eiDescription
-        , "milestone_id" .= eiMilestoneId
-        , "labels" .= eiLabels
-        , "status" .= eiStatus
-        , "updated_at" .= eiUpdateTime
-        , "weight" .= eiWeight
+        $ catMaybes
+        [ "title" .=? eiTitle
+        , "description" .=? eiDescription
+        , "milestone_id" .=? eiMilestoneId
+        , "labels" .=? eiLabels
+        , "state_event" .=? eiStatus
+        , "updated_at" .=? eiUpdateTime
+        , "weight" .=? eiWeight
         ]
-
 
 type EditIssueAPI =
     GitLabRoot :> "projects"
@@ -146,6 +152,12 @@ type EditIssueAPI =
     :> Capture "iid" IssueIid
     :> ReqBody '[JSON] EditIssue
     :> Put '[JSON] IssueResp
+
+nullEditIssue :: EditIssue -> Bool
+nullEditIssue (EditIssue a b c d e _ g) =
+    isNothing a && isNothing b && isNothing c &&
+    isNothing d && isNothing e && isNothing g
+    -- N.B. Ignore update time
 
 editIssue :: AccessToken -> ProjectId -> IssueIid -> EditIssue -> ClientM IssueResp
 editIssue = client (Proxy :: Proxy EditIssueAPI) . Just
