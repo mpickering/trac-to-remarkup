@@ -17,6 +17,9 @@ import Data.Time.Clock
 import Servant.API
 import Servant.Client
 
+newtype AccessToken = AccessToken Text
+                    deriving (Eq, Ord, Show, ToHttpApiData, IsString)
+
 newtype ProjectId = ProjectId Int
                   deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
@@ -39,6 +42,7 @@ data IssueResp
     = IssueResp { irProjectId :: ProjectId
                 , irIid :: IssueIid
                 }
+    deriving (Show)
 
 instance FromJSON IssueResp where
     parseJSON = withObject "issue response" $ \o ->
@@ -62,10 +66,16 @@ instance ToJSON CreateIssue where
         , "description" .= ciDescription
         ]
 
-type CreateIssueAPI = "projects" :> Capture "id" ProjectId :> "issues" :> ReqBody '[JSON] CreateIssue :> Post '[JSON] IssueResp
+type GitLabRoot = Header "Private-Token" AccessToken
 
-createIssue :: ProjectId -> CreateIssue -> ClientM IssueResp
-createIssue = client (Proxy :: Proxy CreateIssueAPI)
+type CreateIssueAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "issues"
+    :> ReqBody '[JSON] CreateIssue
+    :> Post '[JSON] IssueResp
+
+createIssue :: AccessToken -> ProjectId -> CreateIssue -> ClientM IssueResp
+createIssue = client (Proxy :: Proxy CreateIssueAPI) . Just
 
 data CreateIssueNote
     = CreateIssueNote { cinBody :: Text
@@ -78,7 +88,12 @@ instance ToJSON CreateIssueNote where
         , "created_at" .= cinCreatedAt
         ]
 
-type CreateIssueNoteAPI = "projects" :> Capture "id" ProjectId :> "issues" :> Capture "iid" IssueIid :> "notes" :> ReqBody '[JSON] CreateIssueNote :> Post '[JSON] IssueResp
+type CreateIssueNoteAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "issues"
+    :> Capture "iid" IssueIid :> "notes"
+    :> ReqBody '[JSON] CreateIssueNote
+    :> Post '[JSON] IssueResp
 
-createIssueNote :: ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueResp
+createIssueNote :: Maybe AccessToken -> ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueResp
 createIssueNote = client (Proxy :: Proxy CreateIssueNoteAPI)

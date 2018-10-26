@@ -51,7 +51,9 @@ executable import
                        trac-to-remarkup,
                        gitlab-servant,
                        servant-client,
-                       http-client
+                       data-default,
+                       connection,
+                       http-client-tls
 
 Test-Suite test
     default-language:    Haskell2010

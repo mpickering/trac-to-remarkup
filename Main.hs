@@ -5,6 +5,8 @@
 module Main where
 
 import Control.Monad
+import Control.Monad.IO.Class
+import Data.Default (def)
 import Data.Foldable
 import Data.Functor.Identity
 import Data.Maybe
@@ -13,12 +15,16 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 
 import Database.PostgreSQL.Simple
-import Network.HTTP.Client (newManager, defaultManagerSettings)
+import Network.HTTP.Client.TLS as TLS
+import Network.Connection (TLSSettings(..))
 import Servant.Client
 
 import GitLab.Tickets
 import Trac.Db
 import Trac.Db.Types
+
+gitlabToken :: AccessToken
+gitlabToken = "eT4mt9KK1CgeYoMo-5Nx"
 
 main :: IO ()
 main = do
@@ -27,9 +33,11 @@ main = do
     --mapM_ print tickets
     mapM_ (getTicketChanges conn >=> print) $ map ticketNumber tickets
 
-    mgr <- newManager defaultManagerSettings
-    let clientEnv = mkClientEnv mgr (BaseUrl Https "localhost" 80 "")
+    let tlsSettings = def { settingDisableCertificateValidation = True }
+    mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
+    let clientEnv = mkClientEnv mgr (BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4")
     res <- runClientM (run $ head tickets) clientEnv
+    print res
     return ()
 
 run :: Ticket -> ClientM ()
@@ -47,7 +55,8 @@ run t = do
                             , ciCreatedAt = Just $ ticketCreationTime t
                             , ciDescription = Just description
                             }
-    ir <- createIssue (ProjectId 40) issue
+    ir <- createIssue gitlabToken (ProjectId 1) issue
+    liftIO $ print ir
     return ()
 
 -- | Maps Trac keywords to labels
