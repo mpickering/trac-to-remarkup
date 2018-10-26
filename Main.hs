@@ -139,14 +139,14 @@ createTicketChanges milestoneMap iid tc = do
         $ void $ createIssueNote gitlabToken project iid note
 
     let status = case ticketStatus $ changeFields tc of
-                   Nothing  -> Nothing
-                   Just New -> Just ReopenEvent
-                   Just Assigned -> Just ReopenEvent
-                   Just Patch -> Just ReopenEvent
-                   Just Merge -> Just ReopenEvent
-                   Just Closed -> Just CloseEvent
+                   Nothing         -> Nothing
+                   Just New        -> Just ReopenEvent
+                   Just Assigned   -> Just ReopenEvent
+                   Just Patch      -> Just ReopenEvent
+                   Just Merge      -> Just ReopenEvent
+                   Just Closed     -> Just CloseEvent
                    Just InfoNeeded -> Just ReopenEvent
-                   Just Upstream -> Just ReopenEvent
+                   Just Upstream   -> Just ReopenEvent
 
         notNull :: Maybe Text -> Maybe Text
         notNull (Just s) | T.null s = Nothing
