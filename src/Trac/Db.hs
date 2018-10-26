@@ -37,7 +37,7 @@ type Row =
     (Integer, Text, TracTime, Text,
      Text, Text, Text) :.
     (Maybe Text, Text, Maybe Text,
-     Maybe Text, Maybe Text)
+     Maybe Text, Maybe Text, TracTime)
 
 getTickets :: Connection -> IO [Ticket]
 getTickets conn = do
@@ -45,7 +45,7 @@ getTickets conn = do
       [sql|SELECT id, type, time, component,
                   priority, reporter, status,
                   version, summary, milestone,
-                  keywords, description
+                  keywords, description, changetime
            FROM ticket
            LIMIT 1000
           |]
@@ -65,16 +65,14 @@ getTickets conn = do
           [Only x] -> x
 
     toTicket :: Row -> IO Ticket
-    toTicket ((n, typ, TracTime time, component,
+    toTicket ((n, typ, TracTime ticketCreationTime, component,
                prio, reporter, status) :.
               (mb_version, summary, mb_milestone,
-               mb_keywords, mb_description))
+               mb_keywords, mb_description, TracTime ticketChangeTime))
       = do
         let ticketStatus = Identity New
             ticketNumber = TicketNumber n
-            ticketTime = time
             ticketCreator = reporter
-            ticketCreationTime = time
 
         let findOrig :: FromField a => Text -> a -> IO a
             findOrig field def = fromMaybe def <$> findOrigField field ticketNumber

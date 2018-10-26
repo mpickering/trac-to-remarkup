@@ -18,6 +18,7 @@ data TicketType = FeatureRequest | Bug | MergeReq | Task
 
 data Ticket = Ticket { ticketNumber       :: TicketNumber
                      , ticketCreationTime :: UTCTime
+                     , ticketChangeTime   :: UTCTime
                      , ticketFields       :: Fields Identity
                      , ticketCreator      :: Text
                      }
