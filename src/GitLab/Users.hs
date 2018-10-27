@@ -38,6 +38,7 @@ instance ToJSON CreateUser where
         [ "email" .= cuEmail
         , "username" .=  cuUsername
         , "name" .=  cuName
+        , "reset_password" .= True
         , "skip_confirmation" .= cuSkipConfirmation
         ]
 
@@ -50,11 +51,12 @@ instance FromJSON CreateUserResp where
 type CreateUserAPI =
     GitLabRoot :> "users"
     :> ReqBody '[JSON] CreateUser
-    :> Put '[JSON] CreateUserResp
+    :> Post '[JSON] CreateUserResp
 
-createUser :: AccessToken -> CreateUser -> ClientM CreateUserResp
-createUser tok cu =
-    client (Proxy :: Proxy CreateUserAPI) (Just tok) cu
+createUser :: AccessToken -> CreateUser -> ClientM UserId
+createUser tok cu = do
+    CreateUserResp uid <- client (Proxy :: Proxy CreateUserAPI) (Just tok) cu
+    return uid
 
 
 ----------------------------------------------------------------------
@@ -73,3 +75,38 @@ findUserByUsername tok username = do
                [] -> Nothing
                [CreateUserResp uid] -> Just uid
                _ -> error $ "Multiple users with id "<>show username
+
+----------------------------------------------------------------------
+-- addProjectMember
+----------------------------------------------------------------------
+
+type AddProjectMemberAPI =
+    GitLabRoot :> "projects"
+    :> Capture "id" ProjectId :> "members"
+    :> ReqBody '[JSON] AddProjectMember
+    :> Post '[JSON] Object
+
+data AccessLevel = Guest | Reporter | Developer | Maintainer | Owner
+
+instance ToJSON AccessLevel where
+    toJSON l = toJSON $ case l of
+                          Guest      -> 10 :: Int
+                          Reporter   -> 20
+                          Developer  -> 30
+                          Maintainer -> 40
+                          Owner      -> 50
+
+data AddProjectMember = AddProjectMember UserId AccessLevel
+
+instance ToJSON AddProjectMember where
+    toJSON (AddProjectMember uid access) = object
+        [ "user_id" .= uid
+        , "access_level" .= access
+        ]
+
+addProjectMember :: AccessToken -> ProjectId
+                 -> UserId -> AccessLevel -> ClientM ()
+addProjectMember tok prj uid access = do
+    client (Proxy :: Proxy AddProjectMemberAPI) (Just tok) prj
+        $ AddProjectMember uid access
+    return ()

@@ -46,9 +46,12 @@ library gitlab-servant
 
 executable import
   main-is:             Main.hs
+  ghc-options:         -threaded
   build-depends:       base,
                        text,
                        mtl,
+                       async,
+                       stm,
                        containers,
                        exceptions,
                        postgresql-simple,

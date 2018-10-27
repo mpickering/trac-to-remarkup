@@ -10,6 +10,8 @@ import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Error.Class
+import Control.Concurrent.STM
+import Control.Concurrent.Async
 import Data.Default (def)
 import Data.Foldable
 import Data.Function
@@ -28,6 +30,7 @@ import Servant.Client
 
 import GitLab.Tickets
 import GitLab.Common
+import GitLab.Users
 import Trac.Db as Trac
 import Trac.Db.Types as Trac
 import qualified Trac.Convert
@@ -38,35 +41,97 @@ gitlabToken = "eT4mt9KK1CgeYoMo-5Nx"
 project :: ProjectId
 project = ProjectId 1
 
+tlsSettings :: TLSSettings
+tlsSettings = def { settingDisableCertificateValidation = True }
+
+gitlabBaseUrl :: BaseUrl
+gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
+
+
 type MilestoneMap = M.Map Text MilestoneId
 
 main :: IO ()
 main = do
     conn <- connectPostgreSQL ""
-
-    let tlsSettings = def { settingDisableCertificateValidation = True }
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
-    let clientEnv = mkClientEnv mgr (BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4")
-
-    res <- runClientM (runImport conn) clientEnv
+    let env = mkClientEnv mgr gitlabBaseUrl
+    getUserId <- createUserWorker env
+    Right milestoneMap <- runClientM (makeMilestones conn) env
+    tickets <- Trac.getTickets conn
+    res <- runClientM (runImport conn milestoneMap getUserId tickets) env
     print res
 
-runImport :: Connection -> ClientM ()
-runImport conn = do
-    tickets <- liftIO $ Trac.getTickets conn
-    --mapM_ print tickets
-    --liftIO $ mapM_ (getTicketChanges conn >=> print) $ map ticketNumber tickets
+type Username = Text
 
+type UserReqChan = TChan (Username, TMVar UserId)
+
+sanitizeUsername :: Username -> Username
+sanitizeUsername n
+  | Just _ <- T.find (== '<') n =
+    sanitizeUsername $ T.takeWhile (/= '>') $ T.tail $ T.dropWhile (/= '<') n
+  | otherwise =
+    T.map fixChars $ T.takeWhile (/= '@') n
+  where
+    fixChars c = c
+
+createUserWorker :: ClientEnv -> IO (Username -> IO UserId)
+createUserWorker clientEnv = do
+    userReqChan <- newTChanIO
+    userWorker <- async $ do
+        res <- runClientM (go userReqChan mempty) clientEnv
+        either throwM (const $ return ()) res
+    link userWorker
+    return $ findUserId userReqChan
+  where
+    findUserId :: UserReqChan -> Username -> IO UserId
+    findUserId chan username = do
+        resp <- newEmptyTMVarIO
+        atomically $ writeTChan chan (username, resp)
+        atomically $ takeTMVar resp
+
+    go :: UserReqChan -> M.Map Username UserId -> ClientM a
+    go chan accum = do
+        (username, respChan) <- liftIO $ atomically $ readTChan chan
+        (uid, accum') <-
+            case M.lookup username accum of
+              Just uid -> return (uid, accum)
+              Nothing -> do
+                  let cuUsername = "trac-"<>sanitizeUsername username
+                  resp <- findUserByUsername gitlabToken cuUsername
+                  uid <-
+                      case resp of
+                        Just uid -> return uid
+                        Nothing -> do
+                            let cuEmail = "trac+"<>sanitizeUsername username<>"@haskell.org"
+                                cuName = username
+                                cuSkipConfirmation = True
+                            liftIO $ putStrLn $ "Creating user " <> show username
+                            uid <- createUser gitlabToken $ CreateUser {..}
+                            addProjectMember gitlabToken project uid Reporter
+                            return uid
+
+                  return (uid, M.insert username uid accum)
+
+        liftIO $ atomically $ putTMVar respChan uid
+        go chan accum'
+
+makeMilestones :: Connection -> ClientM MilestoneMap
+makeMilestones conn = do
     milestones <- liftIO $ Trac.getMilestones conn
-    --milestoneMap <- mconcat <$> mapM createMilestone' milestones
-    milestoneMap <- foldMap (\(GitLab.Tickets.Milestone a b) -> M.singleton a b)
+    --mconcat <$> mapM createMilestone' milestones
+    foldMap (\(GitLab.Tickets.Milestone a b) -> M.singleton a b)
         <$> listMilestones gitlabToken project
 
+runImport :: Connection
+          -> MilestoneMap
+          -> (Username -> IO UserId)
+          -> [Trac.Ticket] -> ClientM ()
+runImport conn milestoneMap getUserId tickets = do
     mapM_ (createTicket' milestoneMap) tickets
   where
     createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
     createMilestone' Trac.Milestone{..} = do
-        mid <- createMilestone gitlabToken project
+        mid <- createMilestone gitlabToken Nothing project
             $ CreateMilestone { cmTitle = mName
                               , cmDescription = mDescription
                               , cmDueDate = Just mDue
@@ -75,10 +140,10 @@ runImport conn = do
         return $ M.singleton mName mid
 
     createTicket' milestoneMap t = do
-        iid <- createTicket milestoneMap t
+        iid <- createTicket milestoneMap getUserId t
         tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
         let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
-        mapM_ (createTicketChanges milestoneMap iid . collapseChanges) groups
+        mapM_ (createTicketChanges milestoneMap getUserId iid . collapseChanges) groups
 
 collapseChanges :: [TicketChange] -> TicketChange
 collapseChanges tcs = TicketChange
@@ -92,9 +157,11 @@ tracToMarkdown :: TicketNumber -> Text -> Text
 tracToMarkdown (TicketNumber n) src =
       T.pack $ Trac.Convert.convert (fromIntegral n) mempty (T.unpack src)
 
-createTicket :: MilestoneMap -> Ticket -> ClientM IssueIid
-createTicket milestoneMap t = do
+createTicket :: MilestoneMap -> (Username -> IO UserId)
+             -> Ticket -> ClientM IssueIid
+createTicket milestoneMap getUserId t = do
     liftIO $ print $ ticketNumber t
+    creatorUid <- liftIO $ getUserId $ ticketCreator t
     let extraRows = [ ("Reporter", ticketCreator t) ]
         description = T.unlines
             [ tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
@@ -117,15 +184,15 @@ createTicket milestoneMap t = do
           = return ()
         handle404 e
           = throwError e
-    deleteIssue gitlabToken project iid `catchError` handle404
-    ir <- createIssue gitlabToken project issue
-    --editIssue gitlabToken project iid
-    --    $ EditIssue { eiUpdateTime = Just ticketChangeTime t }
+    deleteIssue gitlabToken Nothing project iid `catchError` handle404
+    ir <- createIssue gitlabToken (Just creatorUid) project issue
     liftIO $ print ir
     return $ irIid ir
 
-createTicketChanges :: MilestoneMap -> IssueIid -> TicketChange -> ClientM ()
-createTicketChanges milestoneMap iid tc = do
+createTicketChanges :: MilestoneMap -> (Username -> IO UserId)
+                    -> IssueIid -> TicketChange -> ClientM ()
+createTicketChanges milestoneMap getUserId iid tc = do
+    authorUid <- liftIO $ getUserId $ changeAuthor tc
     let body = T.unlines
             [ tracToMarkdown ticketNumber $ fromMaybe mempty $ changeComment tc
             , ""
@@ -138,7 +205,7 @@ createTicketChanges milestoneMap iid tc = do
 
     case changeComment tc of
       Just c | not $ T.null $ T.strip c ->
-               void $ createIssueNote gitlabToken project iid note
+               void $ createIssueNote gitlabToken (Just authorUid) project iid note
       _ -> return ()
 
     let status = case ticketStatus $ changeFields tc of
@@ -166,7 +233,7 @@ createTicketChanges milestoneMap iid tc = do
                          }
     liftIO $ print edit
     when (not $ nullEditIssue edit)
-        $ void $ editIssue gitlabToken project iid edit
+        $ void $ editIssue gitlabToken (Just authorUid) project iid edit
     return ()
 
 -- | Maps Trac keywords to labels
