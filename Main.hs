@@ -115,7 +115,7 @@ sanitizeUsername n
 
 type UserIdOracle = Username -> IO UserId
 
-type UserWorkerT = MaybeT (StateT (M.Map Username UserId) ClientM)
+type UserLookupM = MaybeT (StateT (M.Map Username UserId) ClientM)
 
 createUserWorker :: ClientEnv -> IO UserIdOracle
 createUserWorker clientEnv = do
@@ -139,7 +139,7 @@ createUserWorker clientEnv = do
         liftIO $ atomically $ putTMVar respChan uid
         go chan
 
-    getUserId :: Username -> UserWorkerT UserId
+    getUserId :: Username -> UserLookupM UserId
     getUserId username =
         tryCache
         <|> cacheIt tryLookupName
@@ -150,20 +150,20 @@ createUserWorker clientEnv = do
           | Just u <- M.lookup username knownUsers = u
           | otherwise = "trac-"<>sanitizeUsername username
 
-        tryCache :: UserWorkerT UserId
+        tryCache :: UserLookupM UserId
         tryCache = do
             cache <- lift get
             MaybeT $ pure $ M.lookup username cache
 
-        tryLookupEmail :: UserWorkerT UserId
+        tryLookupEmail :: UserLookupM UserId
         tryLookupEmail =
             MaybeT $ lift $ findUserByEmail gitlabToken username
 
-        tryLookupName :: UserWorkerT UserId
+        tryLookupName :: UserLookupM UserId
         tryLookupName =
             MaybeT $ lift $ findUserByUsername gitlabToken cuUsername
 
-        tryCreate :: UserWorkerT UserId
+        tryCreate :: UserLookupM UserId
         tryCreate = lift $ do
             let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
                 cuName = username
@@ -173,7 +173,7 @@ createUserWorker clientEnv = do
             lift $ addProjectMember gitlabToken project uid Reporter
             return uid
 
-        cacheIt :: UserWorkerT UserId -> UserWorkerT UserId
+        cacheIt :: UserLookupM UserId -> UserLookupM UserId
         cacheIt action = do
             uid <- action
             lift $ modify' $ M.insert username uid
