@@ -16,7 +16,7 @@ import Control.Monad.Error.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State
-import Control.Concurrent.STM
+import Control.Concurrent
 import Control.Concurrent.Async
 import Data.Default (def)
 import Data.Foldable
@@ -89,7 +89,7 @@ main = do
     conn <- connectPostgreSQL ""
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
     let env = mkClientEnv mgr gitlabBaseUrl
-    getUserId <- createUserWorker env
+    getUserId <- mkUserIdOracle env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
     (finishedTickets, finishTicket) <- openTicketStateFile
     tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets)
@@ -106,8 +106,6 @@ divide n xs = map f [0..n]
           $ zip [0..] xs
 
 type Username = Text
-
-type UserReqChan = TChan (Username, TMVar UserId)
 
 knownUsers :: M.Map Username Username
 knownUsers = M.fromList
@@ -141,35 +139,38 @@ sanitizeUsername n
       | isDigit c  = c
     fixChars c = '_'
 
-type UserIdOracle = Username -> IO UserId
+type UserIdOracle = Username -> ClientM UserId
 
-type UserLookupM = MaybeT (StateT (M.Map Username UserId) ClientM)
-
-createUserWorker :: ClientEnv -> IO UserIdOracle
-createUserWorker clientEnv = do
-    userReqChan <- newTChanIO
-    userWorker <- async $ do
-        res <- runClientM (runStateT (go userReqChan) mempty) clientEnv
-        either throwM (const $ return ()) res
-    link userWorker
-    return $ findUserId userReqChan
+withMVarState :: forall s m a. (MonadMask m, MonadIO m)
+              => MVar s -> StateT s m a -> m a
+withMVarState var action =
+    fst . fst <$> generalBracket (liftIO $ takeMVar var) release (runStateT action)
   where
-    findUserId :: UserReqChan -> Username -> IO UserId
-    findUserId chan username = do
-        resp <- newEmptyTMVarIO
-        atomically $ writeTChan chan (username, resp)
-        atomically $ takeTMVar resp
+    release :: s -> ExitCase (a, s) -> m ()
+    release s0 exit = do
+        liftIO $ putMVar var $ case exit of
+          ExitCaseSuccess (_, s') -> s'
+          _ -> s0
 
-    go :: UserReqChan -> StateT (M.Map Username UserId) ClientM a
-    go chan = do
-        (username, respChan) <- liftIO $ atomically $ readTChan chan
-        Just uid <- runMaybeT $ getUserId $ T.strip username
-        liftIO $ atomically $ putTMVar respChan uid
-        go chan
+type UserLookupM = MaybeT (StateT UserIdCache ClientM)
 
+type UserIdCache = M.Map Username UserId
+
+mkUserIdOracle :: ClientEnv -> IO UserIdOracle
+mkUserIdOracle clientEnv = do
+    cacheVar <- newMVar mempty
+    let runIt :: Username -> StateT UserIdCache IO (Maybe UserId)
+        runIt username = StateT $ \cache -> do
+            res <- runClientM (runStateT (runMaybeT $ getUserId $ T.strip username) cache) clientEnv
+            either throwM pure res
+    return $ liftIO
+           . fmap (fromMaybe $ error "couldn't resolve user id")
+           . withMVarState cacheVar
+           . runIt
+  where
     getUserId :: Username -> UserLookupM UserId
     getUserId username =
-        tryCache
+            tryCache
         <|> cacheIt tryLookupName
         <|> cacheIt tryLookupEmail
         <|> cacheIt tryCreate
@@ -232,7 +233,7 @@ makeAttachment :: UserIdOracle -> Attachment -> ClientM ()
 makeAttachment getUserId (Attachment{..})
   | TicketAttachment ticketNum <- aResource = do
         content <- Trac.Web.fetchTicketAttachment ticketNum aFilename
-        uid <- liftIO $ getUserId aAuthor
+        uid <- getUserId aAuthor
         msg <- if ".hs" `T.isSuffixOf` aFilename
             then mkSnippet uid ticketNum content
             else mkAttachment uid ticketNum content
@@ -305,7 +306,7 @@ createTicket :: MilestoneMap -> UserIdOracle
              -> Ticket -> ClientM IssueIid
 createTicket milestoneMap getUserId t = do
     liftIO $ print $ ticketNumber t
-    creatorUid <- liftIO $ getUserId $ ticketCreator t
+    creatorUid <- getUserId $ ticketCreator t
     let extraRows = [] -- [ ("Reporter", ticketCreator t) ]
         description = T.unlines
             [ tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
@@ -336,7 +337,7 @@ createTicket milestoneMap getUserId t = do
 createTicketChanges :: MilestoneMap -> UserIdOracle
                     -> IssueIid -> TicketChange -> ClientM ()
 createTicketChanges milestoneMap getUserId iid tc = do
-    authorUid <- liftIO $ getUserId $ changeAuthor tc
+    authorUid <- getUserId $ changeAuthor tc
     let body = T.unlines
             [ tracToMarkdown ticketNumber $ fromMaybe mempty $ changeComment tc
             , ""

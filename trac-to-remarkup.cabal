@@ -67,7 +67,7 @@ executable import
                        async,
                        stm,
                        containers,
-                       exceptions,
+                       exceptions >= 0.9,
                        postgresql-simple,
                        trac-to-remarkup,
                        gitlab-servant,
