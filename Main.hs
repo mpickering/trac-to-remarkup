@@ -20,7 +20,9 @@ import Data.List
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Map as M
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 
 import Database.PostgreSQL.Simple
 import Network.HTTP.Client.TLS as TLS
@@ -30,7 +32,10 @@ import Servant.Client
 
 import GitLab.Tickets
 import GitLab.Common
+import GitLab.Project
+import GitLab.UploadFile
 import GitLab.Users
+import qualified Trac.Web
 import Trac.Db as Trac
 import Trac.Db.Types as Trac
 import qualified Trac.Convert
@@ -76,6 +81,7 @@ knownUsers = M.fromList
     , "Richard Eisenberg <eir@cis.upenn.edu>" .= "goldfire"
     , "p.capriotti@gmail.com" .= "pcapriotti"
     , "Thomas Miedema <thomasmiedema@gmail.com>" .= "thomie"
+    , "pho@cielonegro.org" .= "pho_at_cielonegro.org"
     ]
   where (.=) = (,)
 
@@ -89,7 +95,9 @@ sanitizeUsername n
     fixChars ' ' = '_'
     fixChars c = c
 
-createUserWorker :: ClientEnv -> IO (Username -> IO UserId)
+type UserIdOracle = Username -> IO UserId
+
+createUserWorker :: ClientEnv -> IO UserIdOracle
 createUserWorker clientEnv = do
     userReqChan <- newTChanIO
     userWorker <- async $ do
@@ -123,7 +131,7 @@ createUserWorker clientEnv = do
                                 cuName = username
                                 cuSkipConfirmation = True
                             liftIO $ putStrLn $ "Creating user " <> show username
-                            uid <- createUser gitlabToken $ CreateUser {..}
+                            uid <- createUser gitlabToken CreateUser {..}
                             addProjectMember gitlabToken project uid Reporter
                             return uid
 
@@ -139,12 +147,55 @@ makeMilestones conn = do
     foldMap (\(GitLab.Tickets.Milestone a b) -> M.singleton a b)
         <$> listMilestones gitlabToken project
 
+makeAttachment :: UserIdOracle -> Attachment -> ClientM ()
+makeAttachment getUserId (Attachment{..})
+  | TicketAttachment ticketNum <- aResource = do
+        content <- Trac.Web.fetchTicketAttachment ticketNum aFilename
+        uid <- liftIO $ getUserId aAuthor
+        msg <- if ".hs" `T.isSuffixOf` aFilename
+            then mkSnippet uid ticketNum content
+            else mkAttachment uid ticketNum content
+
+        -- TODO: leave comment
+        return ()
+  | otherwise = return ()
+  where
+    mkSnippet, mkAttachment :: UserId -> TicketNumber -> BS.ByteString -> ClientM Text
+    mkSnippet uid ticketNum content = do
+        let cs = CreateSnippet { csTitle = T.unwords [ aFilename, "from ticket"
+                                                     , T.pack $ show $ getTicketNumber ticketNum
+                                                     ]
+                               , csFileName = aFilename
+                               , csDescription = Just aDescription
+                               , csCode = TE.decodeUtf8 content
+                               , csVisibility = Public
+                               }
+        sid <- GitLab.Project.createSnippet gitlabToken (Just uid) project cs
+        return $ T.unlines
+            [ "Attached file `" <> aFilename <> "` ($" <> T.pack (show $ getSnippetId sid) <> ")."
+            , ""
+            , aDescription
+            ]
+    mkAttachment uid ticketNum content = do
+        url <- GitLab.UploadFile.uploadFile gitlabToken (Just uid) project aFilename content
+        return $ T.unlines
+            [ "Attached file `" <> aFilename <> "` ([download](" <> url <> "))."
+            , ""
+            , aDescription
+            ]
+
+makeAttachments :: Connection -> UserIdOracle -> ClientM ()
+makeAttachments conn getUserId = do
+    attachments <- liftIO $ getAttachments conn
+    mapM_ (makeAttachment getUserId) attachments
+
 runImport :: Connection
           -> MilestoneMap
-          -> (Username -> IO UserId)
+          -> UserIdOracle
           -> [Trac.Ticket] -> ClientM ()
 runImport conn milestoneMap getUserId tickets = do
     mapM_ (createTicket' milestoneMap) tickets
+    makeAttachments conn getUserId
   where
     createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
     createMilestone' Trac.Milestone{..} = do
@@ -174,7 +225,7 @@ tracToMarkdown :: TicketNumber -> Text -> Text
 tracToMarkdown (TicketNumber n) src =
       T.pack $ Trac.Convert.convert (fromIntegral n) mempty (T.unpack src)
 
-createTicket :: MilestoneMap -> (Username -> IO UserId)
+createTicket :: MilestoneMap -> UserIdOracle
              -> Ticket -> ClientM IssueIid
 createTicket milestoneMap getUserId t = do
     liftIO $ print $ ticketNumber t
@@ -206,7 +257,7 @@ createTicket milestoneMap getUserId t = do
     liftIO $ print ir
     return $ irIid ir
 
-createTicketChanges :: MilestoneMap -> (Username -> IO UserId)
+createTicketChanges :: MilestoneMap -> UserIdOracle
                     -> IssueIid -> TicketChange -> ClientM ()
 createTicketChanges milestoneMap getUserId iid tc = do
     authorUid <- liftIO $ getUserId $ changeAuthor tc

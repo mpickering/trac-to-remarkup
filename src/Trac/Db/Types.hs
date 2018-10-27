@@ -10,7 +10,7 @@ import Data.Functor.Identity
 import Data.Text (Text)
 import Data.Time.Clock
 
-newtype TicketNumber = TicketNumber Integer
+newtype TicketNumber = TicketNumber { getTicketNumber :: Integer }
                      deriving (Show)
 
 data TicketType = FeatureRequest | Bug | MergeReq | Task
