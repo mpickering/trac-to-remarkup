@@ -64,13 +64,22 @@ gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
 
 type MilestoneMap = M.Map Text MilestoneId
 
-readTicketStateFile :: IO (S.Set TicketNumber)
-readTicketStateFile = do
+openTicketStateFile :: IO (S.Set TicketNumber, Ticket -> IO ())
+openTicketStateFile = do
     stateFileExists <- doesFileExist ticketStateFile
-    if stateFileExists
-      then S.fromList . map (TicketNumber . read) . lines
-           <$> readFile ticketStateFile
-      else return mempty
+    !finishedTickets <-
+        if stateFileExists
+        then S.fromList . map (TicketNumber . read) . lines
+             <$> readFile ticketStateFile
+        else return mempty
+
+    stateFile <- openFile ticketStateFile AppendMode
+    hSetBuffering stateFile LineBuffering
+    let finishTicket :: Ticket -> IO ()
+        finishTicket t =
+            hPutStrLn stateFile $ show $ getTicketNumber $ ticketNumber t
+    return (finishedTickets, finishTicket)
+
 
 ticketStateFile :: FilePath
 ticketStateFile = "tickets.state"
@@ -82,16 +91,12 @@ main = do
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- createUserWorker env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
-    !finishedTickets <- readTicketStateFile
+    (finishedTickets, finishTicket) <- openTicketStateFile
     tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets)
                <$> Trac.getTickets conn
-    stateFile <- openFile ticketStateFile AppendMode
-    let finishTicket :: Ticket -> IO ()
-        finishTicket t =
-            hPutStrLn stateFile $ show $ getTicketNumber $ ticketNumber t
-        makeTickets' ts = do
+    let makeTickets' ts = do
             runClientM (makeTickets conn milestoneMap getUserId finishTicket ts) env >>= print
-    mapConcurrently makeTickets' (divide 10 tickets) >>= print
+    mapConcurrently makeTickets' (divide 3 tickets) >>= print
     runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
@@ -268,14 +273,17 @@ makeTickets :: Connection
             -> [Trac.Ticket]
             -> ClientM ()
 makeTickets conn milestoneMap getUserId finishTicket tickets = do
-    mapM_ (createTicket' milestoneMap) tickets
+    mapM_ createTicket' tickets
   where
-    createTicket' milestoneMap t = do
+    createTicket' t = flip catchError onError $ do
         iid <- createTicket milestoneMap getUserId t
         tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
         let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
         mapM_ (createTicketChanges milestoneMap getUserId iid . collapseChanges) groups
         liftIO $ finishTicket t
+      where
+        onError err =
+            liftIO $ putStrLn $ "Failed to create ticket " ++ show t ++ ": " ++ show err
 
 collapseChanges :: [TicketChange] -> TicketChange
 collapseChanges tcs = TicketChange
