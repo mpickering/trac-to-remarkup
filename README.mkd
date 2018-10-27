@@ -1,0 +1,27 @@
+Usage
+=====
+
+*note:* This requires a patched GitLab installation during import to allow
+Ticket IDs to be preserved.
+
+1. Reset GitLab database
+
+    In the case of NixOS:
+    ```
+    sudo systemctl stop gitlab
+    sudo systemctl stop gitlab-workhorse
+    sudo systemctl stop gitlab-sidekiq
+    sudo systemctl stop gitaly
+    sudo -u postgres psql -e 'DROP DATABASE gitlab; DROP ROLE gitlab;'
+    sudo systemctl start gitlab
+    sudo systemctl start gitlab-workhorse
+    sudo systemctl start gitlab-sidekiq
+    sudo systemctl start gitaly
+  ```
+  
+2. Create a `ghc` group.
+3. Create a `ghc` project in said group.
+4. Set `project` in `Main.hs` to the project ID of the `ghc` project
+5. Add an access token for root, update `gitlabToken` in `Main.hs`.
+6. Set `gitlabBaseUrl` in `Main.hs`
+7. Run it
