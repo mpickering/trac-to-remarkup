@@ -61,6 +61,7 @@ executable import
   build-depends:       base,
                        bytestring,
                        text,
+                       transformers,
                        mtl,
                        async,
                        stm,

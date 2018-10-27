@@ -7,10 +7,14 @@
 module Main where
 
 import Data.Char
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Error.Class
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Maybe
+import Control.Monad.Trans.State
 import Control.Concurrent.STM
 import Control.Concurrent.Async
 import Data.Default (def)
@@ -65,7 +69,7 @@ main = do
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
     tickets <- Trac.getTickets conn
     let makeTickets' ts = runClientM (makeTickets conn milestoneMap getUserId ts) env >>= print
-    mapConcurrently makeTickets' (divide 5 tickets) >>= print
+    mapConcurrently makeTickets' (divide 10 tickets) >>= print
     runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
@@ -90,6 +94,7 @@ knownUsers = M.fromList
     , "p.capriotti@gmail.com" .= "pcapriotti"
     , "Thomas Miedema <thomasmiedema@gmail.com>" .= "thomie"
     , "pho@cielonegro.org" .= "pho_at_cielonegro.org"
+    , "Favonia" .= "favonia"
     ]
   where (.=) = (,)
 
@@ -110,11 +115,13 @@ sanitizeUsername n
 
 type UserIdOracle = Username -> IO UserId
 
+type UserWorkerT = MaybeT (StateT (M.Map Username UserId) ClientM)
+
 createUserWorker :: ClientEnv -> IO UserIdOracle
 createUserWorker clientEnv = do
     userReqChan <- newTChanIO
     userWorker <- async $ do
-        res <- runClientM (go userReqChan mempty) clientEnv
+        res <- runClientM (runStateT (go userReqChan) mempty) clientEnv
         either throwM (const $ return ()) res
     link userWorker
     return $ findUserId userReqChan
@@ -125,33 +132,45 @@ createUserWorker clientEnv = do
         atomically $ writeTChan chan (username, resp)
         atomically $ takeTMVar resp
 
-    go :: UserReqChan -> M.Map Username UserId -> ClientM a
-    go chan accum = do
+    go :: UserReqChan -> StateT (M.Map Username UserId) ClientM a
+    go chan = do
         (username, respChan) <- liftIO $ atomically $ readTChan chan
-        (uid, accum') <-
-            case M.lookup username accum of
-              Just uid -> return (uid, accum)
-              Nothing -> do
-                  let cuUsername
-                        | Just u <- M.lookup username knownUsers = u
-                        | otherwise = "trac-"<>sanitizeUsername username
-                  resp <- findUserByUsername gitlabToken cuUsername
-                  uid <-
-                      case resp of
-                        Just uid -> return uid
-                        Nothing -> do
-                            let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
-                                cuName = username
-                                cuSkipConfirmation = True
-                            liftIO $ putStrLn $ "Creating user " <> show username
-                            uid <- createUser gitlabToken CreateUser {..}
-                            addProjectMember gitlabToken project uid Reporter
-                            return uid
-
-                  return (uid, M.insert username uid accum)
-
+        Just uid <- runMaybeT $ getUserId username
         liftIO $ atomically $ putTMVar respChan uid
-        go chan accum'
+        go chan
+
+    getUserId :: Username -> UserWorkerT UserId
+    getUserId username =
+        tryCache <|> cacheIt tryLookupName <|> cacheIt tryCreate
+      where
+        cuUsername
+          | Just u <- M.lookup username knownUsers = u
+          | otherwise = "trac-"<>sanitizeUsername username
+
+        tryCache :: UserWorkerT UserId
+        tryCache = do
+            cache <- lift get
+            MaybeT $ pure $ M.lookup username cache
+
+        tryLookupName :: UserWorkerT UserId
+        tryLookupName =
+            MaybeT $ lift $ findUserByUsername gitlabToken cuUsername
+
+        tryCreate :: UserWorkerT UserId
+        tryCreate = lift $ do
+            let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
+                cuName = username
+                cuSkipConfirmation = True
+            liftIO $ putStrLn $ "Creating user " <> show username
+            uid <- lift $ createUser gitlabToken CreateUser {..}
+            lift $ addProjectMember gitlabToken project uid Reporter
+            return uid
+
+        cacheIt :: UserWorkerT UserId -> UserWorkerT UserId
+        cacheIt action = do
+            uid <- action
+            lift $ modify' $ M.insert username uid
+            return uid
 
 makeMilestones :: Connection -> ClientM MilestoneMap
 makeMilestones conn = do
