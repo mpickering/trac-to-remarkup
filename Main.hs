@@ -6,6 +6,7 @@
 
 module Main where
 
+import Data.Char
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -92,8 +93,13 @@ sanitizeUsername n
   | otherwise =
     T.map fixChars $ T.takeWhile (/= '@') n
   where
-    fixChars ' ' = '_'
-    fixChars c = c
+    fixChars '_' = '_'
+    fixChars '-' = '-'
+    fixChars '.' = '.'
+    fixChars c
+      | isLetter c = c
+      | isDigit c  = c
+    fixChars c = '_'
 
 type UserIdOracle = Username -> IO UserId
 
