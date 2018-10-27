@@ -53,7 +53,8 @@ type CreateUserAPI =
     :> Put '[JSON] CreateUserResp
 
 createUser :: AccessToken -> CreateUser -> ClientM CreateUserResp
-createUser = client (Proxy :: Proxy CreateUserAPI) . Just
+createUser tok cu =
+    client (Proxy :: Proxy CreateUserAPI) (Just tok) cu
 
 
 ----------------------------------------------------------------------

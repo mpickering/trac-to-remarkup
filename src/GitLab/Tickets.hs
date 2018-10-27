@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -31,10 +32,6 @@ type GetIssueAPI =
     :> Capture "iid" IssueIid
     :> Post '[JSON] IssueResp
 
-getIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM IssueResp
-getIssue = client (Proxy :: Proxy GetIssueAPI) . Just
-
-
 data IssueResp
     = IssueResp { irProjectId :: ProjectId
                 , irIid :: IssueIid
@@ -45,6 +42,10 @@ instance FromJSON IssueResp where
     parseJSON = withObject "issue response" $ \o ->
       IssueResp <$> o .: "project_id"
                 <*> o .: "iid"
+
+getIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM IssueResp
+getIssue tok prj iid =
+    client (Proxy :: Proxy GetIssueAPI) (Just tok) prj iid
 
 ----------------------------------------------------------------------
 -- createIssue
@@ -75,10 +76,13 @@ type CreateIssueAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "issues"
     :> ReqBody '[JSON] CreateIssue
+    :> SudoParam
     :> Post '[JSON] IssueResp
 
-createIssue :: AccessToken -> ProjectId -> CreateIssue -> ClientM IssueResp
-createIssue = client (Proxy :: Proxy CreateIssueAPI) . Just
+createIssue :: AccessToken -> Maybe UserId
+            -> ProjectId -> CreateIssue -> ClientM IssueResp
+createIssue tok sudo prj ci =
+    client (Proxy :: Proxy CreateIssueAPI) (Just tok) prj ci sudo
 
 ----------------------------------------------------------------------
 -- editIssue
@@ -112,6 +116,7 @@ type EditIssueAPI =
     :> Capture "id" ProjectId :> "issues"
     :> Capture "iid" IssueIid
     :> ReqBody '[JSON] EditIssue
+    :> SudoParam
     :> Put '[JSON] IssueResp
 
 nullEditIssue :: EditIssue -> Bool
@@ -120,8 +125,10 @@ nullEditIssue (EditIssue a b c d e _ g) =
     isNothing d && isNothing e && isNothing g
     -- N.B. Ignore update time
 
-editIssue :: AccessToken -> ProjectId -> IssueIid -> EditIssue -> ClientM IssueResp
-editIssue = client (Proxy :: Proxy EditIssueAPI) . Just
+editIssue :: AccessToken -> Maybe UserId
+          -> ProjectId -> IssueIid -> EditIssue -> ClientM IssueResp
+editIssue tok sudo prj iid ei =
+    client (Proxy :: Proxy EditIssueAPI) (Just tok) prj iid ei sudo
 
 ----------------------------------------------------------------------
 -- createIssueNote
@@ -152,10 +159,14 @@ type CreateIssueNoteAPI =
     :> Capture "id" ProjectId :> "issues"
     :> Capture "iid" IssueIid :> "notes"
     :> ReqBody '[JSON] CreateIssueNote
+    :> SudoParam
     :> Post '[JSON] IssueNoteResp
 
-createIssueNote :: AccessToken -> ProjectId -> IssueIid -> CreateIssueNote -> ClientM IssueNoteResp
-createIssueNote = client (Proxy :: Proxy CreateIssueNoteAPI) . Just
+createIssueNote :: AccessToken -> Maybe UserId
+                -> ProjectId -> IssueIid
+                -> CreateIssueNote -> ClientM IssueNoteResp
+createIssueNote tok sudo prj iis cin =
+    client (Proxy :: Proxy CreateIssueNoteAPI) (Just tok) prj iis cin sudo
 
 ----------------------------------------------------------------------
 -- deleteIssue
@@ -165,10 +176,11 @@ type DeleteIssueAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "issues"
     :> Capture "iid" IssueIid
+    :> SudoParam
     :> Delete '[] NoContent
 
-deleteIssue :: AccessToken -> ProjectId -> IssueIid -> ClientM ()
-deleteIssue tok prj iid = void $ client (Proxy :: Proxy DeleteIssueAPI) (Just tok) prj iid
+deleteIssue :: AccessToken -> Maybe UserId -> ProjectId -> IssueIid -> ClientM ()
+deleteIssue tok sudo prj iid = void $ client (Proxy :: Proxy DeleteIssueAPI) (Just tok) prj iid sudo
 
 ----------------------------------------------------------------------
 -- createMilestone
@@ -178,6 +190,7 @@ type CreateMilestoneAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "milestones"
     :> ReqBody '[JSON] CreateMilestone
+    :> SudoParam
     :> Post '[JSON] CreateMilestoneResp
 
 data CreateMilestone
@@ -201,9 +214,11 @@ instance FromJSON CreateMilestoneResp where
     parseJSON = withObject "create milestone response" $ \o -> do
         CreateMilestoneResp <$> o .: "id"
 
-createMilestone :: AccessToken -> ProjectId -> CreateMilestone -> ClientM MilestoneId
-createMilestone tok prj cm = do
-    CreateMilestoneResp mid <- client (Proxy :: Proxy CreateMilestoneAPI) (Just tok) prj cm
+createMilestone :: AccessToken -> Maybe UserId
+                -> ProjectId -> CreateMilestone
+                -> ClientM MilestoneId
+createMilestone tok sudo prj cm = do
+    CreateMilestoneResp mid <- client (Proxy :: Proxy CreateMilestoneAPI) (Just tok) prj cm sudo
     return mid
 
 ----------------------------------------------------------------------
@@ -221,6 +236,6 @@ instance FromJSON Milestone where
     parseJSON = withObject "milestone" $ \o -> do
         Milestone <$> o .: "title" <*> o .: "id"
 
-listMilestones :: AccessToken -> ProjectId -> ClientM [Milestone]
-listMilestones tok prj = do
-    client (Proxy :: Proxy ListMilestonesAPI) (Just tok) prj
+listMilestones :: AccessToken
+               -> ProjectId -> ClientM [Milestone]
+listMilestones tok = client (Proxy :: Proxy ListMilestonesAPI) (Just tok)

@@ -63,3 +63,5 @@ newtype IssueIid = IssueIid Int
                  deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
 type GitLabRoot = Header "Private-Token" AccessToken
+
+type SudoParam = QueryParam "sudo" UserId
