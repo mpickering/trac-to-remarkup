@@ -210,3 +210,17 @@ getMilestones conn = do
   where
     f (mName, TracTime mDue, TracTime mCompleted, mDescription) =
         Milestone {..}
+
+getAttachments :: Connection -> IO [Attachment]
+getAttachments conn = do
+    map f <$> query_ conn
+        [sql|SELECT type, id, filename, time, description, author, ipnr
+             FROM attachment |]
+  where
+    f :: (Text, Text, Text, TracTime, Text, Text, Text) -> Attachment
+    f (typ, rid, aFilename, TracTime aTime, aDescription, aAuthor, aIpAddr) =
+        Attachment {..}
+      where
+        aResource = case typ of
+          "ticket" -> TicketAttachment $ TicketNumber $ read $ T.unpack rid
+          "wiki" -> WikiAttachment $ WikiName rid

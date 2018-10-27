@@ -126,3 +126,19 @@ data TypeOfFailure
     | RuntimePerformance
     | OtherFailure
     deriving (Show)
+
+newtype WikiName = WikiName Text
+                 deriving (Show)
+
+data Attachment = Attachment { aResource :: AttachmentResource
+                             , aFilename :: Text
+                             , aTime :: UTCTime
+                             , aDescription :: Text
+                             , aAuthor :: Text
+                             , aIpAddr :: Text
+                             }
+                deriving (Show)
+
+data AttachmentResource = TicketAttachment !TicketNumber
+                        | WikiAttachment !WikiName
+                        deriving (Show)
