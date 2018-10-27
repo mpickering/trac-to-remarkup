@@ -374,7 +374,7 @@ typeOfFailureLabels t =
 
 fieldLabels :: Fields Maybe -> Labels
 fieldLabels fields =
-    keywordLbls <> failureLbls
+    "TracImport" <> keywordLbls <> failureLbls
   where
     keywordLbls = mconcat
         [ lbl
