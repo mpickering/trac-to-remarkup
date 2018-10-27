@@ -172,7 +172,6 @@ mkUserIdOracle clientEnv = do
     getUserId username =
             tryCache
         <|> cacheIt tryLookupName
-        <|> cacheIt tryLookupEmail
         <|> cacheIt tryCreate
       where
         cuUsername
@@ -183,14 +182,6 @@ mkUserIdOracle clientEnv = do
         tryCache = do
             cache <- lift get
             MaybeT $ pure $ M.lookup username cache
-
-        tryLookupEmail :: UserLookupM UserId
-        tryLookupEmail = do
-            users <- lift $ lift $ findUserByEmail gitlabToken username
-            case users of
-              []  -> empty
-              [u] -> return $ userId u
-              _   -> error $ "Multiple users with email "<>T.unpack username<>": "<>show users
 
         tryLookupName :: UserLookupM UserId
         tryLookupName =
