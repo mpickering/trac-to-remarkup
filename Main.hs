@@ -27,6 +27,7 @@ import Network.HTTP.Types.Status
 import Servant.Client
 
 import GitLab.Tickets
+import GitLab.Common
 import Trac.Db as Trac
 import Trac.Db.Types as Trac
 import qualified Trac.Convert

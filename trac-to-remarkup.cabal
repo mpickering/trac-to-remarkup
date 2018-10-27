@@ -32,6 +32,8 @@ library
 
 library gitlab-servant
   exposed-modules:     GitLab.Tickets
+                       GitLab.Users
+                       GitLab.Common
   build-depends:       base >=4.9 && <4.13,
                        text,
                        aeson,
