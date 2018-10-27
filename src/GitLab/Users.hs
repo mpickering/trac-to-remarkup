@@ -77,6 +77,23 @@ findUserByUsername tok username = do
                _ -> error $ "Multiple users with id "<>show username
 
 ----------------------------------------------------------------------
+-- findUserByEmail
+----------------------------------------------------------------------
+
+type FindUserByEmailAPI =
+    GitLabRoot :> "users"
+    :> QueryParam "email" Text
+    :> Get '[JSON] [CreateUserResp]
+
+findUserByEmail :: AccessToken -> Text -> ClientM (Maybe UserId)
+findUserByEmail tok email = do
+    res <- client (Proxy :: Proxy FindUserByEmailAPI) (Just tok) (Just email)
+    return $ case res of
+               [] -> Nothing
+               [CreateUserResp uid] -> Just uid
+               _ -> error $ "Multiple users with email "<>show email
+
+----------------------------------------------------------------------
 -- addProjectMember
 ----------------------------------------------------------------------
 

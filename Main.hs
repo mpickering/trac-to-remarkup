@@ -135,13 +135,16 @@ createUserWorker clientEnv = do
     go :: UserReqChan -> StateT (M.Map Username UserId) ClientM a
     go chan = do
         (username, respChan) <- liftIO $ atomically $ readTChan chan
-        Just uid <- runMaybeT $ getUserId username
+        Just uid <- runMaybeT $ getUserId $ T.strip username
         liftIO $ atomically $ putTMVar respChan uid
         go chan
 
     getUserId :: Username -> UserWorkerT UserId
     getUserId username =
-        tryCache <|> cacheIt tryLookupName <|> cacheIt tryCreate
+        tryCache
+        <|> cacheIt tryLookupName
+        <|> cacheIt tryLookupEmail
+        <|> cacheIt tryCreate
       where
         cuUsername
           | Just u <- M.lookup username knownUsers = u
@@ -151,6 +154,10 @@ createUserWorker clientEnv = do
         tryCache = do
             cache <- lift get
             MaybeT $ pure $ M.lookup username cache
+
+        tryLookupEmail :: UserWorkerT UserId
+        tryLookupEmail =
+            MaybeT $ lift $ findUserByEmail gitlabToken username
 
         tryLookupName :: UserWorkerT UserId
         tryLookupName =
