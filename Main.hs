@@ -65,6 +65,20 @@ type Username = Text
 
 type UserReqChan = TChan (Username, TMVar UserId)
 
+knownUsers :: M.Map Username Username
+knownUsers = M.fromList
+    [ "Krzysztof Gogolewski <krz.gogolewski@gmail.com>" .= "int-index"
+    , "Ben Gamari <ben@smart-cactus.org>" .= "bgamari"
+    , "Austin Seipp <aust@well-typed.com>" .= "thoughtpolice"
+    , "ian@well-typed.com" .= "igloo"
+    , "Jan Stolarek <jan.stolarek@p.lodz.pl>" .= "jstolarek"
+    , "marlowsd@gmail.com" .= "simonmar"
+    , "Richard Eisenberg <eir@cis.upenn.edu>" .= "goldfire"
+    , "p.capriotti@gmail.com" .= "pcapriotti"
+    , "Thomas Miedema <thomasmiedema@gmail.com>" .= "thomie"
+    ]
+  where (.=) = (,)
+
 sanitizeUsername :: Username -> Username
 sanitizeUsername n
   | Just _ <- T.find (== '<') n =
@@ -72,6 +86,7 @@ sanitizeUsername n
   | otherwise =
     T.map fixChars $ T.takeWhile (/= '@') n
   where
+    fixChars ' ' = '_'
     fixChars c = c
 
 createUserWorker :: ClientEnv -> IO (Username -> IO UserId)
@@ -96,13 +111,15 @@ createUserWorker clientEnv = do
             case M.lookup username accum of
               Just uid -> return (uid, accum)
               Nothing -> do
-                  let cuUsername = "trac-"<>sanitizeUsername username
+                  let cuUsername
+                        | Just u <- M.lookup username knownUsers = u
+                        | otherwise = "trac-"<>sanitizeUsername username
                   resp <- findUserByUsername gitlabToken cuUsername
                   uid <-
                       case resp of
                         Just uid -> return uid
                         Nothing -> do
-                            let cuEmail = "trac+"<>sanitizeUsername username<>"@haskell.org"
+                            let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
                                 cuName = username
                                 cuSkipConfirmation = True
                             liftIO $ putStrLn $ "Creating user " <> show username
