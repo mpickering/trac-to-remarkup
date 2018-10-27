@@ -36,10 +36,10 @@ import Trac.Db.Types as Trac
 import qualified Trac.Convert
 
 gitlabToken :: AccessToken
-gitlabToken = "eT4mt9KK1CgeYoMo-5Nx"
+gitlabToken = "zZChwxtdAZ4TS52FWw4K"
 
 project :: ProjectId
-project = ProjectId 1
+project = ProjectId 7
 
 tlsSettings :: TLSSettings
 tlsSettings = def { settingDisableCertificateValidation = True }
@@ -56,7 +56,7 @@ main = do
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- createUserWorker env
-    Right milestoneMap <- runClientM (makeMilestones conn) env
+    milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
     tickets <- Trac.getTickets conn
     res <- runClientM (runImport conn milestoneMap getUserId tickets) env
     print res
@@ -179,7 +179,7 @@ createTicket :: MilestoneMap -> (Username -> IO UserId)
 createTicket milestoneMap getUserId t = do
     liftIO $ print $ ticketNumber t
     creatorUid <- liftIO $ getUserId $ ticketCreator t
-    let extraRows = [ ("Reporter", ticketCreator t) ]
+    let extraRows = [] -- [ ("Reporter", ticketCreator t) ]
         description = T.unlines
             [ tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
             , ""
@@ -213,7 +213,7 @@ createTicketChanges milestoneMap getUserId iid tc = do
     let body = T.unlines
             [ tracToMarkdown ticketNumber $ fromMaybe mempty $ changeComment tc
             , ""
-            , fieldsTable [("User", changeAuthor tc)] (changeFields tc)
+            , fieldsTable {-[("User", changeAuthor tc)]-} [] (changeFields tc)
             ]
         note = CreateIssueNote { cinBody = body
                                , cinCreatedAt = Just $ changeTime tc
