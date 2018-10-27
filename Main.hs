@@ -3,6 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Main where
 
@@ -24,10 +25,13 @@ import Data.Functor.Identity
 import Data.List
 import Data.Maybe
 import Data.Text (Text)
-import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import System.IO
+import System.Directory
 
 import Database.PostgreSQL.Simple
 import Network.HTTP.Client.TLS as TLS
@@ -60,6 +64,17 @@ gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
 
 type MilestoneMap = M.Map Text MilestoneId
 
+readTicketStateFile :: IO (S.Set TicketNumber)
+readTicketStateFile = do
+    stateFileExists <- doesFileExist ticketStateFile
+    if stateFileExists
+      then S.fromList . map (TicketNumber . read) . lines
+           <$> readFile ticketStateFile
+      else return mempty
+
+ticketStateFile :: FilePath
+ticketStateFile = "tickets.state"
+
 main :: IO ()
 main = do
     conn <- connectPostgreSQL ""
@@ -67,8 +82,15 @@ main = do
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- createUserWorker env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
-    tickets <- Trac.getTickets conn
-    let makeTickets' ts = runClientM (makeTickets conn milestoneMap getUserId ts) env >>= print
+    !finishedTickets <- readTicketStateFile
+    tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets)
+               <$> Trac.getTickets conn
+    stateFile <- openFile ticketStateFile AppendMode
+    let finishTicket :: Ticket -> IO ()
+        finishTicket t =
+            hPutStrLn stateFile $ show $ getTicketNumber $ ticketNumber t
+        makeTickets' ts = do
+            runClientM (makeTickets conn milestoneMap getUserId finishTicket ts) env >>= print
     mapConcurrently makeTickets' (divide 10 tickets) >>= print
     runClientM (makeAttachments conn getUserId) env >>= print
 
@@ -95,6 +117,7 @@ knownUsers = M.fromList
     , "Thomas Miedema <thomasmiedema@gmail.com>" .= "thomie"
     , "pho@cielonegro.org" .= "pho_at_cielonegro.org"
     , "Favonia" .= "favonia"
+    , "andygill" .= "AndyGill"
     ]
   where (.=) = (,)
 
@@ -241,8 +264,10 @@ makeAttachments conn getUserId = do
 makeTickets :: Connection
             -> MilestoneMap
             -> UserIdOracle
-            -> [Trac.Ticket] -> ClientM ()
-makeTickets conn milestoneMap getUserId tickets = do
+            -> (Ticket -> IO ())
+            -> [Trac.Ticket]
+            -> ClientM ()
+makeTickets conn milestoneMap getUserId finishTicket tickets = do
     mapM_ (createTicket' milestoneMap) tickets
   where
     createTicket' milestoneMap t = do
@@ -250,6 +275,7 @@ makeTickets conn milestoneMap getUserId tickets = do
         tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
         let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
         mapM_ (createTicketChanges milestoneMap getUserId iid . collapseChanges) groups
+        liftIO $ finishTicket t
 
 collapseChanges :: [TicketChange] -> TicketChange
 collapseChanges tcs = TicketChange

@@ -60,6 +60,7 @@ executable import
   ghc-options:         -threaded
   build-depends:       base,
                        bytestring,
+                       directory,
                        text,
                        transformers,
                        mtl,

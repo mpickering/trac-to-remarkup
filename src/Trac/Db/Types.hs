@@ -11,7 +11,7 @@ import Data.Text (Text)
 import Data.Time.Clock
 
 newtype TicketNumber = TicketNumber { getTicketNumber :: Integer }
-                     deriving (Show)
+                     deriving (Show, Ord, Eq)
 
 data TicketType = FeatureRequest | Bug | MergeReq | Task
                 deriving (Show)
