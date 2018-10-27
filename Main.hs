@@ -64,8 +64,15 @@ main = do
     getUserId <- createUserWorker env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
     tickets <- Trac.getTickets conn
-    res <- runClientM (runImport conn milestoneMap getUserId tickets) env
-    print res
+    let makeTickets' ts = runClientM (makeTickets conn milestoneMap getUserId ts) env >>= print
+    mapConcurrently makeTickets' (divide 5 tickets) >>= print
+    runClientM (makeAttachments conn getUserId) env >>= print
+
+divide :: Int -> [a] -> [[a]]
+divide n xs = map f [0..n]
+  where
+    f i = mapMaybe (\(j,x) -> if j `mod` n == 0 then Just x else Nothing)
+          $ zip [0..] xs
 
 type Username = Text
 
@@ -152,6 +159,16 @@ makeMilestones conn = do
     --mconcat <$> mapM createMilestone' milestones
     foldMap (\(GitLab.Tickets.Milestone a b) -> M.singleton a b)
         <$> listMilestones gitlabToken project
+  where
+    createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
+    createMilestone' Trac.Milestone{..} = do
+        mid <- createMilestone gitlabToken Nothing project
+            $ CreateMilestone { cmTitle = mName
+                              , cmDescription = mDescription
+                              , cmDueDate = Just mDue
+                              , cmStartDate = Nothing
+                              }
+        return $ M.singleton mName mid
 
 makeAttachment :: UserIdOracle -> Attachment -> ClientM ()
 makeAttachment getUserId (Attachment{..})
@@ -195,24 +212,13 @@ makeAttachments conn getUserId = do
     attachments <- liftIO $ getAttachments conn
     mapM_ (makeAttachment getUserId) attachments
 
-runImport :: Connection
-          -> MilestoneMap
-          -> UserIdOracle
-          -> [Trac.Ticket] -> ClientM ()
-runImport conn milestoneMap getUserId tickets = do
+makeTickets :: Connection
+            -> MilestoneMap
+            -> UserIdOracle
+            -> [Trac.Ticket] -> ClientM ()
+makeTickets conn milestoneMap getUserId tickets = do
     mapM_ (createTicket' milestoneMap) tickets
-    makeAttachments conn getUserId
   where
-    createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
-    createMilestone' Trac.Milestone{..} = do
-        mid <- createMilestone gitlabToken Nothing project
-            $ CreateMilestone { cmTitle = mName
-                              , cmDescription = mDescription
-                              , cmDueDate = Just mDue
-                              , cmStartDate = Nothing
-                              }
-        return $ M.singleton mName mid
-
     createTicket' milestoneMap t = do
         iid <- createTicket milestoneMap getUserId t
         tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
