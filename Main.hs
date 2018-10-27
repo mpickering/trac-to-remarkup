@@ -184,12 +184,16 @@ createUserWorker clientEnv = do
             MaybeT $ pure $ M.lookup username cache
 
         tryLookupEmail :: UserLookupM UserId
-        tryLookupEmail =
-            MaybeT $ lift $ findUserByEmail gitlabToken username
+        tryLookupEmail = do
+            users <- lift $ lift $ findUserByEmail gitlabToken username
+            case users of
+              []  -> empty
+              [u] -> return $ userId u
+              _   -> error $ "Multiple users with email "<>T.unpack username<>": "<>show users
 
         tryLookupName :: UserLookupM UserId
         tryLookupName =
-            MaybeT $ lift $ findUserByUsername gitlabToken cuUsername
+            fmap userId $ MaybeT $ lift $ findUserByUsername gitlabToken cuUsername
 
         tryCreate :: UserLookupM UserId
         tryCreate = lift $ do

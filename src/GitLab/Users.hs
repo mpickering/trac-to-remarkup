@@ -42,21 +42,29 @@ instance ToJSON CreateUser where
         , "skip_confirmation" .= cuSkipConfirmation
         ]
 
-data CreateUserResp = CreateUserResp UserId
+data User = User { userId       :: UserId
+                 , userUsername :: Text
+                 , userName     :: Text
+                 , userEmail    :: Maybe Text
+                 }
+          deriving (Show)
 
-instance FromJSON CreateUserResp where
-    parseJSON = withObject "create user response" $ \o -> do
-        CreateUserResp <$> o .: "id"
+instance FromJSON User where
+    parseJSON = withObject "user" $ \o -> do
+        User <$> o .: "id"
+             <*> o .: "username"
+             <*> o .: "name"
+             <*> o .:? "email"
 
 type CreateUserAPI =
     GitLabRoot :> "users"
     :> ReqBody '[JSON] CreateUser
-    :> Post '[JSON] CreateUserResp
+    :> Post '[JSON] User
 
 createUser :: AccessToken -> CreateUser -> ClientM UserId
 createUser tok cu = do
-    CreateUserResp uid <- client (Proxy :: Proxy CreateUserAPI) (Just tok) cu
-    return uid
+    user <- client (Proxy :: Proxy CreateUserAPI) (Just tok) cu
+    return $ userId user
 
 
 ----------------------------------------------------------------------
@@ -66,14 +74,14 @@ createUser tok cu = do
 type FindUserByUsernameAPI =
     GitLabRoot :> "users"
     :> QueryParam "username" Text
-    :> Get '[JSON] [CreateUserResp]
+    :> Get '[JSON] [User]
 
-findUserByUsername :: AccessToken -> Text -> ClientM (Maybe UserId)
+findUserByUsername :: AccessToken -> Text -> ClientM (Maybe User)
 findUserByUsername tok username = do
     res <- client (Proxy :: Proxy FindUserByUsernameAPI) (Just tok) (Just username)
     return $ case res of
                [] -> Nothing
-               [CreateUserResp uid] -> Just uid
+               [user] -> Just user
                _ -> error $ "Multiple users with id "<>show username
 
 ----------------------------------------------------------------------
@@ -83,15 +91,11 @@ findUserByUsername tok username = do
 type FindUserByEmailAPI =
     GitLabRoot :> "users"
     :> QueryParam "email" Text
-    :> Get '[JSON] [CreateUserResp]
+    :> Get '[JSON] [User]
 
-findUserByEmail :: AccessToken -> Text -> ClientM (Maybe UserId)
-findUserByEmail tok email = do
-    res <- client (Proxy :: Proxy FindUserByEmailAPI) (Just tok) (Just email)
-    return $ case res of
-               [] -> Nothing
-               [CreateUserResp uid] -> Just uid
-               _ -> error $ "Multiple users with email "<>show email
+findUserByEmail :: AccessToken -> Text -> ClientM [User]
+findUserByEmail tok email =
+    client (Proxy :: Proxy FindUserByEmailAPI) (Just tok) (Just email)
 
 ----------------------------------------------------------------------
 -- addProjectMember
