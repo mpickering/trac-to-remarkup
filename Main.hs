@@ -100,9 +100,9 @@ main = do
     runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
-divide n xs = map f [0..n]
+divide n xs = map f [0..n-1]
   where
-    f i = mapMaybe (\(j,x) -> if j `mod` n == 0 then Just x else Nothing)
+    f i = mapMaybe (\(j,x) -> if j `mod` n == i then Just x else Nothing)
           $ zip [0..] xs
 
 type Username = Text
