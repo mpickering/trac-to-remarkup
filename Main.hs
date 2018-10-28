@@ -271,13 +271,14 @@ makeTickets :: Connection
 makeTickets conn milestoneMap getUserId finishTicket tickets = do
     mapM_ createTicket' tickets
   where
-    createTicket' t = flip catchError onError $ do
+    createTicket' t = handleAll onError $ flip catchError onError $ do
         iid <- createTicket milestoneMap getUserId t
         tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
         let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
         mapM_ (createTicketChanges milestoneMap getUserId iid . collapseChanges) groups
         liftIO $ finishTicket t
       where
+        onError :: (MonadIO m, Show a) => a -> m ()
         onError err =
             liftIO $ putStrLn $ "Failed to create ticket " ++ show t ++ ": " ++ show err
 
