@@ -9,30 +9,35 @@ module Trac.Web where
 
 import Control.Monad
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import qualified Data.Set as S
+import Data.List (intercalate)
 import Data.Text (Text)
 import Data.Semigroup
 import Data.Maybe
-import Data.Aeson
-import Data.Aeson.Types (Pair)
-import Data.Proxy
-import Data.Time.Clock
-import Servant.API
-import Servant.Client
 import Trac.Db.Types
+import Servant.Client
+import System.Process
+import System.Exit
 
 ----------------------------------------------------------------------
 -- fetchTicketAttachment
 ----------------------------------------------------------------------
 
-deriving instance ToHttpApiData TicketNumber
+fetchTicketAttachment :: BaseUrl -> TicketNumber -> Text -> IO ByteString
+fetchTicketAttachment baseUrl (TicketNumber n) filename = do
+    let url = intercalate "/"
+              [ showBaseUrl baseUrl
+              , "raw-attachment/ticket"
+              , show n
+              , T.unpack filename
+              ]
+        cp = (proc "curl" [url]) { std_out = CreatePipe }
+    (_, Just out, _, h) <- createProcess cp
+    content <- BS.hGetContents out
+    exit <- waitForProcess h
+    case exit of
+      ExitFailure n -> fail $ "Fetching "++show url++" failed with code "++show n
+      ExitSuccess -> return ()
+    return content
 
-type FetchTicketAttachmentAPI =
-    "raw-attachment" :> "ticket"
-    :> Capture "ticket" TicketNumber
-    :> Capture "filename" Text
-    :> Get '[OctetStream] ByteString
-
-fetchTicketAttachment :: TicketNumber -> Text -> ClientM ByteString
-fetchTicketAttachment = client (Proxy :: Proxy FetchTicketAttachmentAPI)

@@ -63,6 +63,9 @@ gitlabBaseUrl :: BaseUrl
 gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
 
 
+tracBaseUrl :: BaseUrl
+tracBaseUrl = BaseUrl Https "ghc.haskell.org" 443 "/trac/ghc"
+
 type MilestoneMap = M.Map Text MilestoneId
 
 openTicketStateFile :: IO (S.Set TicketNumber, Ticket -> IO ())
@@ -226,13 +229,7 @@ makeAttachment getUserId (Attachment{..})
   | TicketAttachment ticketNum <- aResource = do
         liftIO $ putStrLn $ "Attachment " ++ show (aResource, aFilename)
         mgr <- manager <$> ask
-        mcontent <- liftIO
-            $ runClientM (Trac.Web.fetchTicketAttachment ticketNum aFilename)
-                         (mkClientEnv mgr tracBaseUrl)
-        content <- case mcontent of
-          Left err -> fail $ "Error fetching attachment " ++ show (aResource, aFilename) ++
-                             ": " ++ show err
-          Right content -> pure content
+        content <- liftIO $ Trac.Web.fetchTicketAttachment tracBaseUrl ticketNum aFilename
         uid <- getUserId aAuthor
         msg <- if ".hs" `T.isSuffixOf` aFilename
             then mkSnippet uid ticketNum content

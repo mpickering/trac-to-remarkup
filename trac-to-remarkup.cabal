@@ -30,6 +30,7 @@ library
                        time,
                        postgresql-simple,
                        aeson,
+                       process,
                        servant,
                        servant-client
   hs-source-dirs:      src
