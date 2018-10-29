@@ -35,7 +35,7 @@ uploadFile :: AccessToken -> Maybe UserId -> ProjectId
 uploadFile (AccessToken tok) sudo (ProjectId prjId) fname cs = do
     liftIO $ createDirectoryIfMissing True "tmp"
     let tmpfile = "tmp/" <> T.unpack fname
-        sudoParam = maybe "" (\uid -> "?sudo=" <> show uid) sudo
+        sudoParam = maybe "" (\uid -> "?sudo=" <> show (getUserId uid)) sudo
     liftIO $ BS.writeFile tmpfile cs
     base <- baseUrl <$> ask
     out <- liftIO $ readProcess "curl"
@@ -45,7 +45,7 @@ uploadFile (AccessToken tok) sudo (ProjectId prjId) fname cs = do
         , showBaseUrl base <> "/projects/" <> show prjId <> "/uploads" <> sudoParam
         ]
         ""
-    liftIO $ removeFile tmpfile
     UploadFileResp url <- either (fail . show) return
         $ Data.Aeson.eitherDecode $ BSL.pack out
+    liftIO $ removeFile tmpfile
     return url

@@ -25,7 +25,7 @@ import Servant.Client
 key .=? Nothing = Nothing
 key .=? Just x = Just $ key .= toJSON x
 
-newtype UserId = UserId Int
+newtype UserId = UserId { getUserId :: Int }
                deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
 newtype Weight = Weight Int
