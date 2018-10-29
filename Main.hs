@@ -18,7 +18,7 @@ import Control.Monad.Reader.Class
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State
 import Control.Concurrent
-import Control.Concurrent.Async
+import Control.Concurrent.Async (mapConcurrently_)
 import Data.Default (def)
 import Data.Foldable
 import Data.Function
@@ -50,18 +50,22 @@ import Trac.Db as Trac
 import Trac.Db.Types as Trac
 import qualified Trac.Convert
 
-gitlabToken :: AccessToken
-gitlabToken = "zZChwxtdAZ4TS52FWw4K"
-
 project :: ProjectId
-project = ProjectId 7
+project = ProjectId 1
 
 tlsSettings :: TLSSettings
 tlsSettings = def { settingDisableCertificateValidation = True }
 
+gitlabToken :: AccessToken
 gitlabBaseUrl :: BaseUrl
-gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
 
+-- staging
+--gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
+--gitlabToken = "zZChwxtdAZ4TS52FWw4K"
+
+-- ben-server
+gitlabBaseUrl = BaseUrl Https "gitlab.home.smart-cactus.org" 443 "/api/v4"
+gitlabToken = "1CfgUx6ox3wBf11z1KWT"
 
 tracBaseUrl :: BaseUrl
 tracBaseUrl = BaseUrl Https "ghc.haskell.org" 443 "/trac/ghc"
@@ -100,7 +104,9 @@ main = do
                <$> Trac.getTickets conn
     let makeTickets' ts = do
             runClientM (makeTickets conn milestoneMap getUserId finishTicket ts) env >>= print
-    mapConcurrently makeTickets' (divide 3 tickets) >>= print
+            putStrLn "makeTickets' done"
+    --mapConcurrently_ makeTickets' (divide 10 tickets)
+    putStrLn "Making attachments"
     runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
