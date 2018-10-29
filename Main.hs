@@ -72,21 +72,20 @@ tracBaseUrl = BaseUrl Https "ghc.haskell.org" 443 "/trac/ghc"
 
 type MilestoneMap = M.Map Text MilestoneId
 
-openTicketStateFile :: IO (S.Set TicketNumber, Ticket -> IO ())
-openTicketStateFile = do
-    stateFileExists <- doesFileExist ticketStateFile
-    !finishedTickets <-
+openStateFile :: forall a. (Ord a, Read a, Show a)
+              => FilePath -> IO (S.Set a, a -> IO ())
+openStateFile stateFile = do
+    stateFileExists <- doesFileExist stateFile
+    !finished <-
         if stateFileExists
-        then S.fromList . map (TicketNumber . read) . lines
-             <$> readFile ticketStateFile
+        then S.fromList . map read . lines <$> readFile stateFile
         else return mempty
 
-    stateFile <- openFile ticketStateFile AppendMode
+    stateFile <- openFile stateFile AppendMode
     hSetBuffering stateFile LineBuffering
-    let finishTicket :: Ticket -> IO ()
-        finishTicket t =
-            hPutStrLn stateFile $ show $ getTicketNumber $ ticketNumber t
-    return (finishedTickets, finishTicket)
+    let finishItem :: a -> IO ()
+        finishItem = hPutStrLn stateFile . show
+    return (finished, finishItem)
 
 
 ticketStateFile :: FilePath
@@ -99,11 +98,12 @@ main = do
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- mkUserIdOracle env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
-    (finishedTickets, finishTicket) <- openTicketStateFile
+    (finishedTickets, finishTicket) <- openStateFile ticketStateFile
     tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets)
                <$> Trac.getTickets conn
     let makeTickets' ts = do
-            runClientM (makeTickets conn milestoneMap getUserId finishTicket ts) env >>= print
+            let finishTicket' = finishTicket . ticketNumber
+            runClientM (makeTickets conn milestoneMap getUserId finishTicket' ts) env >>= print
             putStrLn "makeTickets' done"
     --mapConcurrently_ makeTickets' (divide 10 tickets)
     putStrLn "Making attachments"
