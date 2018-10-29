@@ -29,7 +29,7 @@ import Trac.Db.Types
 deriving instance ToHttpApiData TicketNumber
 
 type FetchTicketAttachmentAPI =
-    "attachment" :> "ticket"
+    "raw-attachment" :> "ticket"
     :> Capture "ticket" TicketNumber
     :> Capture "filename" Text
     :> Get '[OctetStream] ByteString

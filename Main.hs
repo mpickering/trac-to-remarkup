@@ -14,6 +14,7 @@ import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Control.Monad.Error.Class
 import Control.Monad.Trans.Class
+import Control.Monad.Reader.Class
 import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.State
 import Control.Concurrent
@@ -223,7 +224,15 @@ makeMilestones conn = do
 makeAttachment :: UserIdOracle -> Attachment -> ClientM ()
 makeAttachment getUserId (Attachment{..})
   | TicketAttachment ticketNum <- aResource = do
-        content <- Trac.Web.fetchTicketAttachment ticketNum aFilename
+        liftIO $ putStrLn $ "Attachment " ++ show (aResource, aFilename)
+        mgr <- manager <$> ask
+        mcontent <- liftIO
+            $ runClientM (Trac.Web.fetchTicketAttachment ticketNum aFilename)
+                         (mkClientEnv mgr tracBaseUrl)
+        content <- case mcontent of
+          Left err -> fail $ "Error fetching attachment " ++ show (aResource, aFilename) ++
+                             ": " ++ show err
+          Right content -> pure content
         uid <- getUserId aAuthor
         msg <- if ".hs" `T.isSuffixOf` aFilename
             then mkSnippet uid ticketNum content
