@@ -128,7 +128,7 @@ data TypeOfFailure
     deriving (Show)
 
 newtype WikiName = WikiName Text
-                 deriving (Show)
+                 deriving (Ord, Eq, Show, Read)
 
 data Attachment = Attachment { aResource    :: AttachmentResource
                              , aFilename    :: Text
@@ -137,8 +137,8 @@ data Attachment = Attachment { aResource    :: AttachmentResource
                              , aAuthor      :: Text
                              , aIpAddr      :: Maybe Text
                              }
-                deriving (Show)
+                deriving (Show, Read)
 
 data AttachmentResource = TicketAttachment !TicketNumber
                         | WikiAttachment !WikiName
-                        deriving (Show)
+                        deriving (Ord, Eq, Show, Read)

@@ -88,6 +88,9 @@ openStateFile stateFile = do
     return (finished, finishItem)
 
 
+attachmentStateFile :: FilePath
+attachmentStateFile = "attachments.state"
+
 ticketStateFile :: FilePath
 ticketStateFile = "tickets.state"
 
@@ -277,7 +280,15 @@ makeAttachment getUserId (Attachment{..})
 makeAttachments :: Connection -> UserIdOracle -> ClientM ()
 makeAttachments conn getUserId = do
     attachments <- liftIO $ getAttachments conn
-    mapM_ (makeAttachment getUserId) attachments
+    (finishedAttachments, finishAttachment) <-
+        liftIO $ openStateFile attachmentStateFile
+    let makeAttachment' a
+          | aIdent `S.member` finishedAttachments = return ()
+          | otherwise = do
+            makeAttachment getUserId a
+            liftIO $ finishAttachment aIdent
+          where aIdent = (aResource a, aFilename a, aTime a)
+    mapM_ makeAttachment' $ attachments
 
 makeTickets :: Connection
             -> MilestoneMap
