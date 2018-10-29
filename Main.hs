@@ -248,11 +248,15 @@ makeAttachment getUserId (Attachment{..})
   where
     mkSnippet, mkAttachment :: UserId -> TicketNumber -> BS.ByteString -> ClientM Text
     mkSnippet uid ticketNum content = do
-        let cs = CreateSnippet { csTitle = T.unwords [ aFilename, "from ticket"
-                                                     , T.pack $ show $ getTicketNumber ticketNum
-                                                     ]
+        let title = T.unwords [ aFilename, "from ticket"
+                              , "#" <> T.pack (show $ getTicketNumber ticketNum)
+                              ]
+            cs = CreateSnippet { csTitle = title
                                , csFileName = aFilename
-                               , csDescription = Just aDescription
+                               , csDescription = Just $ T.unlines [ aDescription
+                                                                  , ""
+                                                                  , title
+                                                                  ]
                                , csCode = TE.decodeUtf8 content
                                , csVisibility = Public
                                }
@@ -284,10 +288,14 @@ makeAttachments conn getUserId = do
         liftIO $ openStateFile attachmentStateFile
     let makeAttachment' a
           | aIdent `S.member` finishedAttachments = return ()
-          | otherwise = do
+          | otherwise = handleAll onError $ flip catchError onError $ do
             makeAttachment getUserId a
             liftIO $ finishAttachment aIdent
-          where aIdent = (aResource a, aFilename a, aTime a)
+          where
+            aIdent = (aResource a, aFilename a, aTime a)
+            onError :: (MonadIO m, Show a) => a -> m ()
+            onError err =
+                liftIO $ putStrLn $ "Failed to create attachment " ++ show a ++ ": " ++ show err
     mapM_ makeAttachment' $ attachments
 
 makeTickets :: Connection
