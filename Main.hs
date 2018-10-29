@@ -234,9 +234,7 @@ makeAttachment getUserId (Attachment{..})
         msg <- if ".hs" `T.isSuffixOf` aFilename
             then mkSnippet uid ticketNum content
             else mkAttachment uid ticketNum content
-
-        -- TODO: leave comment
-        return ()
+        mkComment uid (IssueIid $ fromIntegral $ getTicketNumber ticketNum) msg
   | otherwise = return ()
   where
     mkSnippet, mkAttachment :: UserId -> TicketNumber -> BS.ByteString -> ClientM Text
@@ -262,6 +260,13 @@ makeAttachment getUserId (Attachment{..})
             , ""
             , aDescription
             ]
+
+    mkComment :: UserId -> IssueIid -> Text -> ClientM ()
+    mkComment uid iid msg = do
+        let note = CreateIssueNote { cinBody = msg
+                                   , cinCreatedAt = Just aTime
+                                   }
+        void $ createIssueNote gitlabToken (Just uid) project iid note
 
 makeAttachments :: Connection -> UserIdOracle -> ClientM ()
 makeAttachments conn getUserId = do
