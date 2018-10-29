@@ -217,7 +217,7 @@ getAttachments conn = do
         [sql|SELECT type, id, filename, time, description, author, ipnr
              FROM attachment |]
   where
-    f :: (Text, Text, Text, TracTime, Text, Text, Text) -> Attachment
+    f :: (Text, Text, Text, TracTime, Text, Text, Maybe Text) -> Attachment
     f (typ, rid, aFilename, TracTime aTime, aDescription, aAuthor, aIpAddr) =
         Attachment {..}
       where

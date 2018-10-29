@@ -130,12 +130,12 @@ data TypeOfFailure
 newtype WikiName = WikiName Text
                  deriving (Show)
 
-data Attachment = Attachment { aResource :: AttachmentResource
-                             , aFilename :: Text
-                             , aTime :: UTCTime
+data Attachment = Attachment { aResource    :: AttachmentResource
+                             , aFilename    :: Text
+                             , aTime        :: UTCTime
                              , aDescription :: Text
-                             , aAuthor :: Text
-                             , aIpAddr :: Text
+                             , aAuthor      :: Text
+                             , aIpAddr      :: Maybe Text
                              }
                 deriving (Show)
 
