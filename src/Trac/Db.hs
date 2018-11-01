@@ -223,4 +223,5 @@ getAttachments conn = do
       where
         aResource = case typ of
           "ticket" -> TicketAttachment $ TicketNumber $ read $ T.unpack rid
-          "wiki" -> WikiAttachment $ WikiName rid
+          "wiki"   -> WikiAttachment $ WikiName rid
+          _        -> error $ "Unknown attachment resource type " ++ show typ
