@@ -3,10 +3,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module GitLab.Users where
 
 import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Error
 import qualified Data.Text as T
 import qualified Data.Set as S
 import Data.Text (Text)
@@ -66,6 +69,15 @@ createUser tok cu = do
     user <- client (Proxy :: Proxy CreateUserAPI) (Just tok) cu
     return $ userId user
 
+createUserMaybe :: AccessToken -> CreateUser -> ClientM (Maybe UserId)
+createUserMaybe tok cu =
+    (Just <$> createUser tok cu)
+    `catchError`
+    (\err -> do
+        liftIO $ print err
+        return Nothing
+    )
+
 
 ----------------------------------------------------------------------
 -- findUserByUsername
@@ -83,6 +95,23 @@ findUserByUsername tok username = do
                [] -> Nothing
                [user] -> Just user
                _ -> error $ "Multiple users with id "<>show username
+
+----------------------------------------------------------------------
+-- findUserByEmail
+----------------------------------------------------------------------
+
+type FindUserByEmailAPI =
+    GitLabRoot :> "users"
+    :> QueryParam "email" Text
+    :> Get '[JSON] [User]
+
+findUserByEmail :: AccessToken -> Text -> ClientM (Maybe User)
+findUserByEmail tok email = do
+    res <- client (Proxy :: Proxy FindUserByEmailAPI) (Just tok) (Just email)
+    return $ case res of
+               [] -> Nothing
+               [user] -> Just user
+               _ -> error $ "Multiple users with email "<>show email
 
 
 ----------------------------------------------------------------------

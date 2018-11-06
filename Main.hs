@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main where
 
@@ -62,10 +63,17 @@ gitlabBaseUrl :: BaseUrl
 -- staging
 --gitlabBaseUrl = BaseUrl Https "gitlab.ghc.smart-cactus.org" 443 "/api/v4"
 --gitlabToken = "zZChwxtdAZ4TS52FWw4K"
+--dsn = ""
 
 -- ben-server
-gitlabBaseUrl = BaseUrl Https "gitlab.home.smart-cactus.org" 443 "/api/v4"
-gitlabToken = "1CfgUx6ox3wBf11z1KWT"
+-- gitlabBaseUrl = BaseUrl Https "gitlab.home.smart-cactus.org" 443 "/api/v4"
+-- gitlabToken = "1CfgUx6ox3wBf11z1KWT"
+-- dsn = ""
+
+-- tobias local
+gitlabBaseUrl = BaseUrl Http "gitlabghc.nibbler" 80 "/api/v4"
+gitlabToken = "WWHmsVF943KX8sK3zfD2"
+dsn = "dbname=trac_ghc"
 
 tracBaseUrl :: BaseUrl
 tracBaseUrl = BaseUrl Https "ghc.haskell.org" 443 "/trac/ghc"
@@ -96,7 +104,7 @@ ticketStateFile = "tickets.state"
 
 main :: IO ()
 main = do
-    conn <- connectPostgreSQL ""
+    conn <- connectPostgreSQL dsn
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- mkUserIdOracle env
@@ -108,7 +116,7 @@ main = do
             let finishTicket' = finishTicket . ticketNumber
             runClientM (makeTickets conn milestoneMap getUserId finishTicket' ts) env >>= print
             putStrLn "makeTickets' done"
-    --mapConcurrently_ makeTickets' (divide 10 tickets)
+    mapConcurrently_ makeTickets' (divide 10 tickets)
     putStrLn "Making attachments"
     runClientM (makeAttachments conn getUserId) env >>= print
 
@@ -185,6 +193,7 @@ mkUserIdOracle clientEnv = do
     getUserId username =
             tryCache
         <|> cacheIt tryLookupName
+        <|> cacheIt tryLookupEmail
         <|> cacheIt tryCreate
       where
         cuUsername
@@ -200,15 +209,26 @@ mkUserIdOracle clientEnv = do
         tryLookupName =
             fmap userId $ MaybeT $ lift $ findUserByUsername gitlabToken cuUsername
 
-        tryCreate :: UserLookupM UserId
-        tryCreate = lift $ do
+        tryLookupEmail :: UserLookupM UserId
+        tryLookupEmail = do
             let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
-                cuName = username
-                cuSkipConfirmation = True
-            liftIO $ putStrLn $ "Creating user " <> show username
-            uid <- lift $ createUser gitlabToken CreateUser {..}
-            lift $ addProjectMember gitlabToken project uid Reporter
-            return uid
+            fmap userId $ MaybeT $ lift $ findUserByEmail gitlabToken cuEmail
+
+        tryCreate :: UserLookupM UserId
+        tryCreate = do
+            uidMay <- lift $ do
+              let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
+                  cuName = username
+                  cuSkipConfirmation = True
+              liftIO $ putStrLn $ "Creating user " <> show username <> " (" <> show cuEmail <> ")"
+              lift $ createUserMaybe gitlabToken CreateUser {..}
+            case uidMay of
+              Nothing ->
+                fail "User already exists"
+              Just uid -> do
+                liftIO $ putStrLn $ "User created " <> show username <> " as " <> show uid
+                lift . lift $ addProjectMember gitlabToken project uid Reporter
+                return uid
 
         cacheIt :: UserLookupM UserId -> UserLookupM UserId
         cacheIt action = do
