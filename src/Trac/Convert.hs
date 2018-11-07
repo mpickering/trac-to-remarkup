@@ -26,15 +26,39 @@ convertBlock n cm (R.Header nlev is bs)
   = Header nlev (convertInlines n cm is) (convertBlocks n cm bs)
 convertBlock n cm (R.Para is)        = Para (convertInlines n cm is)
 convertBlock n cm (R.List _ bs)      = List Style (map (:[]) (convertBlocks n cm bs))
-convertBlock n cm (R.DefnList _)     = convertDefnListToTable
+convertBlock n cm (R.DefnList d)     = convertDefnListToTable n cm d
 convertBlock n cm (R.Code ty s)      = CodeBlock ty s
 convertBlock n cm (R.BlockQuote bs)  = Quote [Para (convertInlines n cm bs)]
 convertBlock n cm (R.Discussion bs)  = Quote (convertBlocks n cm bs)
-convertBlock _ _ R.Table            = Table
-convertBlock _ _ R.HorizontalLine   = HorizontalLine
+convertBlock n cm (R.Table rs)       = Table (convertTableRows n cm rs)
+convertBlock _ _ R.HorizontalLine    = HorizontalLine
 
-convertDefnListToTable :: Block
-convertDefnListToTable = Para []
+convertTableRows :: Int -> CommentMap -> [R.TableRow] -> [TableRow]
+convertTableRows n cm = map (convertTableRow n cm)
+
+convertTableRow :: Int -> CommentMap -> R.TableRow -> TableRow
+convertTableRow n cm = map (convertTableCell n cm)
+
+convertTableCell :: Int -> CommentMap -> R.TableCell -> TableCell
+convertTableCell n cm (R.TableHeaderCell is) = TableHeaderCell (convertInlines n cm is)
+convertTableCell n cm (R.TableCell is) = TableCell (convertInlines n cm is)
+
+convertDefnListToTable :: Int -> CommentMap -> [(R.Inlines, [R.Inlines])] -> Block
+convertDefnListToTable n cm [] = Para []
+convertDefnListToTable n cm items = Table $ mconcat (map (convertDefnToTableRows n cm) items)
+
+convertDefnToTableRows :: Int -> CommentMap -> (R.Inlines, [R.Inlines]) -> [TableRow]
+convertDefnToTableRows n cm (dh, []) = [[ TableHeaderCell $ convertInlines n cm dh ]]
+convertDefnToTableRows n cm (dh, dd:dds) = convertFirstDefnRow n cm dh dd : convertAdditionalDefnRows n cm dds
+
+convertFirstDefnRow :: Int -> CommentMap -> R.Inlines -> R.Inlines -> TableRow
+convertFirstDefnRow n cm dh dd = [ TableHeaderCell $ convertInlines n cm dh, TableCell $ convertInlines n cm dd ]
+
+convertAdditionalDefnRow :: Int -> CommentMap -> R.Inlines -> TableRow
+convertAdditionalDefnRow n cm dd = [ TableCell [], TableCell $ convertInlines n cm dd ]
+
+convertAdditionalDefnRows :: Int -> CommentMap -> [R.Inlines] -> [TableRow]
+convertAdditionalDefnRows n cm = map (convertAdditionalDefnRow n cm)
 
 convertInlines n cm = map (convertInline n cm)
 

@@ -55,15 +55,20 @@ type Blocks = [Block]
 type Type = Maybe String
 
 data Block = Header Int Inlines Blocks
-            | Para Inlines
-            | List ListType [Block]
-            | DefnList [(Inlines, [Inlines])]
-            | Code Type String
-            | BlockQuote Inlines
-            | Discussion [Block]
-            | Table
-            | HorizontalLine deriving Show
+           | Para Inlines
+           | List ListType [Block]
+           | DefnList [(Inlines, [Inlines])]
+           | Code Type String
+           | BlockQuote Inlines
+           | Discussion [Block]
+           | Table [TableRow]
+           | HorizontalLine deriving Show
 
+type TableRow = [TableCell]
+
+data TableCell = TableCell Inlines
+               | TableHeaderCell Inlines
+               deriving (Show)
 
 type Document = [Block]
 
@@ -162,6 +167,7 @@ endline = try $ do
   notFollowedBy literalBlockStart
   notFollowedBy (char '>')
   notFollowedBy (string "  ")
+  notFollowedBy (string "||")
   return LineBreak
 
 skipSpaces :: Parser ()
@@ -173,7 +179,7 @@ block :: Parser Block
 block = do
   many blankline
   getInput >>= \s -> traceM "block" >>=  \_ -> traceShowM s
-  r <- choice [pList, discussion, blockQuote, literalBlock, defnList,header, para]
+  r <- choice [table, pList, discussion, blockQuote, literalBlock, defnList,header, para]
   many blankline
   traceShowM r
   getInput >>= traceShowM
@@ -259,6 +265,28 @@ defnItem = try $ do
 -- traceM "here4"
  traceShowM (defn, mis, iss)
  return (defn, maybeToList mis ++ iss)
+
+
+table :: Parser Block
+table = try $ do
+  getInput >>= \s -> traceShowM ("table", s)
+  Table <$> some tableRow
+  
+tableRow :: Parser TableRow
+tableRow = do
+  string "||" *> many tableCell <* newline
+
+tableCell :: Parser TableCell
+tableCell = tableHeaderCell <|> tableRegularCell
+
+tableHeaderCell :: Parser TableCell
+tableHeaderCell = do
+  try (string "=")
+  TableHeaderCell <$> manyTill inline (try (string "=||") <|> try (string "||"))
+
+tableRegularCell :: Parser TableCell
+tableRegularCell = do
+  TableCell <$> manyTill inline (string "||")
 
 discussion :: Parser Block
 discussion = do

@@ -34,6 +34,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import System.IO
 import System.Directory
+import System.Environment
 
 import Database.PostgreSQL.Simple
 import Network.HTTP.Client.TLS as TLS
@@ -104,20 +105,25 @@ ticketStateFile = "tickets.state"
 
 main :: IO ()
 main = do
+    args <- getArgs
+    print args
+    let ticketNumbers = S.fromList . map (TicketNumber . read) $ args
+    print ticketNumbers
     conn <- connectPostgreSQL dsn
     mgr <- TLS.newTlsManagerWith $ TLS.mkManagerSettings tlsSettings Nothing
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- mkUserIdOracle env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
     (finishedTickets, finishTicket) <- openStateFile ticketStateFile
-    tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets)
+    tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets) .
+               filter (\t -> ticketNumber t `S.member` ticketNumbers || S.null ticketNumbers)
                <$> Trac.getTickets conn
     let makeTickets' ts = do
             let finishTicket' = finishTicket . ticketNumber
             runClientM (makeTickets conn milestoneMap getUserId finishTicket' ts) env >>= print
             putStrLn "makeTickets' done"
     mapConcurrently_ makeTickets' (divide 10 tickets)
-    putStrLn "Making attachments"
+    -- putStrLn "Making attachments"
     runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]

@@ -39,10 +39,19 @@ data Block = Header Int Inlines Blocks
            | Para Inlines
            | List Style [Blocks]
            | CodeBlock (Maybe Lang) String
-           | Table
+           | Table [TableRow]
            | HorizontalLine
 
 type Lang = String
+
+type TableRow = [TableCell]
+
+data TableCell = TableHeaderCell Inlines
+               | TableCell Inlines
+
+tableCellContents :: TableCell -> Inlines
+tableCellContents (TableCell is) = is
+tableCellContents (TableHeaderCell is) = is
 
 
 writeRemarkup :: [Block] -> String
@@ -69,8 +78,77 @@ block (CodeBlock ml s) =
     mlang = case ml of
       Just lang -> text lang
       Nothing   -> empty
-block Table = undefined
+block (Table rs) =
+  table rs
 block HorizontalLine = text "---"
+
+table :: [TableRow] -> Doc
+table rs
+  | isProper rs = niceTable rs
+  | otherwise = htmlTable rs
+
+isProper :: [TableRow] -> Bool
+isProper [] = True
+isProper (x:xs) =
+  (isProperHeaderRow x || isProperBodyRow x) && all isProperBodyRow xs
+
+isProperHeaderRow :: TableRow -> Bool
+isProperHeaderRow = all isHeaderCell
+
+isProperBodyRow :: TableRow -> Bool
+isProperBodyRow = all (not . isHeaderCell)
+
+isHeaderCell :: TableCell -> Bool
+isHeaderCell (TableHeaderCell {}) = True
+isHeaderCell (TableCell {}) = False
+
+-- | Render a \"nice\" table (native remarkup)
+niceTable :: [TableRow] -> Doc
+niceTable rows =
+  vcat (map niceRow rows')
+  where
+    -- normalize the table so that all rows have the same column count
+    columns = maximum (1 : map length rows)
+    rows' :: [TableRow]
+    rows' = map (take columns . (++ repeat (TableCell []))) rows
+
+niceRow :: TableRow -> Doc
+niceRow row =
+  if isProperHeaderRow row then
+    vcat [ niceRowCells row, niceHeaderUnderline (length row) ]
+  else
+    niceRowCells row
+
+niceHeaderUnderline :: Int -> Doc
+niceHeaderUnderline n =
+  niceRowRaw (replicate n $ text "-----")
+
+niceRowCells :: [TableCell] -> Doc
+niceRowCells cells =
+  niceRowRaw (map (inlines . tableCellContents) cells)
+
+niceRowRaw :: [Doc] -> Doc
+niceRowRaw items =
+  cat (text "|" : [ text " " <> i <> text " |" | i <- items ])
+
+
+-- | Render an HTML-style table (using HTML tags)
+htmlTable :: [TableRow] -> Doc
+htmlTable rs =
+  vcat [ text "<table>" , htmlTableRows rs , "</table>" ]
+
+htmlTableRows :: [TableRow] -> Doc
+htmlTableRows = vcat . map htmlTableRow
+
+htmlTableRow :: TableRow -> Doc
+htmlTableRow tr = vcat [ "<tr>", htmlTableCells tr, "</tr>" ]
+
+htmlTableCells :: [TableCell] -> Doc
+htmlTableCells = vcat . map htmlTableCell
+
+htmlTableCell :: TableCell -> Doc
+htmlTableCell (TableHeaderCell is) = vcat [ "<th>", inlines is, "</th>" ]
+htmlTableCell (TableCell is) = vcat [ "<td>", inlines is, "</td>" ]
 
 oneListItem :: String -> Blocks -> Doc
 oneListItem mark is = text mark $$ nest 4 (blocks is)
