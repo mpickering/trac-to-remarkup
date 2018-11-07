@@ -84,8 +84,10 @@ block HorizontalLine = text "---"
 
 table :: [TableRow] -> Doc
 table rs
-  | isProper rs = niceTable rs
-  | otherwise = htmlTable rs
+  | isProper rs = niceTable rs'
+  | otherwise = htmlTable rs'
+  where
+    rs' = normalizeTable rs
 
 isProper :: [TableRow] -> Bool
 isProper [] = True
@@ -104,13 +106,32 @@ isHeaderCell (TableCell {}) = False
 
 -- | Render a \"nice\" table (native remarkup)
 niceTable :: [TableRow] -> Doc
-niceTable rows =
-  vcat (map niceRow rows')
+niceTable = vcat . map niceRow
+
+-- | Normalize the table so that all rows have the same column count.
+normalizeTable :: [TableRow] -> [TableRow]
+normalizeTable rows =
+  map doOne rows
   where
-    -- normalize the table so that all rows have the same column count
     columns = maximum (1 : map length rows)
-    rows' :: [TableRow]
-    rows' = map (take columns . (++ repeat (TableCell []))) rows
+    doOne :: TableRow -> TableRow
+    doOne xs =
+      -- If the row contains only header cells, pad it with header cells,
+      -- otherwise pad it with regular cells.
+      --
+      -- We pick this choice in order to preserve "proper-ness" of tables, that
+      -- is, if a table meets the criteria for rendering in remarkup style
+      -- before normalization, it should also meet the criteria after
+      -- normalization; for "improper" tables, the padding choice doesn't
+      -- matter much, but it is reasonable to assume that if a row contains
+      -- any non-header cells, then padding it with more non-header cells is
+      -- acceptable.
+      let emptyCell =
+            if not (null xs) && isProperHeaderRow xs then
+              TableHeaderCell []
+            else
+              TableCell []
+      in take columns $ xs ++ repeat emptyCell
 
 niceRow :: TableRow -> Doc
 niceRow row =
