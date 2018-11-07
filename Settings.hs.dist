@@ -1,0 +1,37 @@
+module Settings where
+
+import GitLab.Common (ProjectId (..), AccessToken (..))
+import Network.Connection (TLSSettings(..))
+import Servant.Client (BaseUrl (..), Scheme (..))
+import Data.Default (def)
+import Data.ByteString (ByteString)
+
+project :: ProjectId
+project = ProjectId 1
+
+-- | TLS Settings; disable certificate validation when testing against a GitLab
+-- instance that uses a snakeoil TLS cert.
+tlsSettings :: TLSSettings
+tlsSettings = def { settingDisableCertificateValidation = False }
+
+-- | Base URL for the target GitLab instance.
+gitlabBaseUrl :: BaseUrl
+-- Plain HTTP:
+-- gitlabBaseUrl = BaseUrl Http "gitlab.example.org" 80 "/api/v4"
+-- Or HTTPS:
+-- gitlabBaseUrl = BaseUrl Https "gitlab.example.org" 443 "/api/v4"
+
+-- | API access token to authenticate against target GitLab instance
+gitlabToken :: AccessToken
+--gitlabToken = "YourGitlabTokenHere0"
+
+-- | PostgreSQL (libpq) connection string.
+-- Use empty DSN to guess the right connection settings, or pass a PostgreSQL
+-- DSN explicitly
+dsn :: ByteString
+-- dsn = ""
+-- dsn = "dbname=trac_ghc"
+
+-- | Base URL for the Trac instance that holds the original data.
+tracBaseUrl :: BaseUrl
+tracBaseUrl = BaseUrl Https "ghc.haskell.org" 443 "/trac/ghc"
