@@ -10,6 +10,11 @@ import Data.Functor.Identity
 import Data.Text (Text)
 import Data.Time.Clock
 
+newtype TracTime = TracTime UTCTime
+                 deriving (Eq, Ord, Show)
+
+type RawTime = Integer
+
 newtype TicketNumber = TicketNumber { getTicketNumber :: Integer }
                      deriving (Show, Read, Ord, Eq)
 
@@ -23,6 +28,21 @@ data Ticket = Ticket { ticketNumber       :: TicketNumber
                      , ticketCreator      :: Text
                      }
             deriving (Show)
+
+data MutationType = CreateTicket -- ^ Ticket creation
+                  | ChangeTicket -- ^ One or more changes
+            deriving (Show, Read, Enum, Ord, Eq)
+
+-- | Ticket mutation; this data structure does not, however, give us
+-- the complete ticket mutation information, only the ticket number,
+-- modification timestamp, and whether it was a ticket creation or
+-- a set of ticket changes. Multiple ticket changes with the same timestamp
+-- and ticket number are reported as one mutation.
+data TicketMutation = TicketMutation { ticketMutationTicket :: TicketNumber
+                                     , ticketMutationTime :: RawTime
+                                     , ticketMutationType :: MutationType
+                                     }
+                                     deriving (Show, Read, Ord, Eq)
 
 data Priority = PrioLowest | PrioLow | PrioNormal | PrioHigh | PrioHighest
               deriving (Show)

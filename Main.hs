@@ -77,6 +77,9 @@ attachmentStateFile = "attachments.state"
 ticketStateFile :: FilePath
 ticketStateFile = "tickets.state"
 
+mutationStateFile :: FilePath
+mutationStateFile = "mutations.state"
+
 main :: IO ()
 main = do
     args <- getArgs
@@ -88,16 +91,20 @@ main = do
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- mkUserIdOracle env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
-    (finishedTickets, finishTicket) <- openStateFile ticketStateFile
-    tickets <- filter (\t -> not $ ticketNumber t `S.member` finishedTickets) .
-               filter (\t -> ticketNumber t `S.member` ticketNumbers || S.null ticketNumbers)
-               <$> Trac.getTickets conn
-    let makeTickets' ts = do
-            let finishTicket' = finishTicket . ticketNumber
-            runClientM (makeTickets conn milestoneMap getUserId finishTicket' ts) env >>= print
-            putStrLn "makeTickets' done"
-    mapConcurrently_ makeTickets' (divide 10 tickets)
-    -- putStrLn "Making attachments"
+
+
+    (finishedMutations, finishMutation) <- openStateFile mutationStateFile
+
+    putStrLn "Making tickets"
+    mutations <- filter (\m -> not $ m `S.member` finishedMutations) .
+                 filter (\m -> ticketMutationTicket m `S.member` ticketNumbers || S.null ticketNumbers)
+                 <$> Trac.getTicketMutations conn
+    let makeMutations' ts = do
+            runClientM (makeMutations conn milestoneMap getUserId finishMutation ts) env >>= print
+            putStrLn "makeMutations' done"
+    makeMutations' mutations
+
+    putStrLn "Making attachments"
     runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
@@ -298,6 +305,39 @@ makeAttachments conn getUserId = do
                 liftIO $ putStrLn $ "Failed to create attachment " ++ show a ++ ": " ++ show err
     mapM_ makeAttachment' $ attachments
 
+makeMutations :: Connection
+              -> MilestoneMap
+              -> UserIdOracle
+              -> (TicketMutation -> IO ())
+              -> [Trac.TicketMutation]
+              -> ClientM ()
+makeMutations conn milestoneMap getUserId finishMutation mutations = do
+  mapM_ makeMutation' mutations
+  where
+    makeMutation' m = handleAll onError $ flip catchError onError $ do
+      case ticketMutationType m of
+        -- Create a new ticket
+        Trac.CreateTicket -> do
+          ticket <- liftIO $ fromMaybe (error "Ticket not found") <$> Trac.getTicket (ticketMutationTicket m) conn
+          iid@(IssueIid issueID) <- createTicket milestoneMap getUserId ticket
+          if ((fromIntegral . getTicketNumber . ticketNumber $ ticket) == issueID)
+            then
+              (liftIO $ finishMutation m)
+            else
+              (liftIO $ putStrLn $ "TICKET NUMBER MISMATCH: " ++ show (ticketNumber ticket) ++ " /= " ++ show iid)
+            
+        -- Apply a ticket change
+        Trac.ChangeTicket -> do
+          changes <- liftIO $ Trac.getTicketChanges conn (ticketMutationTicket m) (Just $ ticketMutationTime m)
+          let iid = IssueIid (fromIntegral . getTicketNumber . ticketMutationTicket $ m)
+          createTicketChanges milestoneMap getUserId iid . collapseChanges $ changes
+          liftIO $ finishMutation m
+
+      where
+        onError :: (MonadIO m, Show a) => a -> m ()
+        onError err =
+            liftIO $ putStrLn $ "Failed to create ticket: " ++ show err
+
 makeTickets :: Connection
             -> MilestoneMap
             -> UserIdOracle
@@ -309,7 +349,7 @@ makeTickets conn milestoneMap getUserId finishTicket tickets = do
   where
     createTicket' t = handleAll onError $ flip catchError onError $ do
         iid <- createTicket milestoneMap getUserId t
-        tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t)
+        tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t) Nothing
         let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
         mapM_ (createTicketChanges milestoneMap getUserId iid . collapseChanges) groups
         liftIO $ finishTicket t
