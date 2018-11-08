@@ -40,8 +40,8 @@ data Inline = Bold Inlines
              | WikiStyle Inlines
              | Monospaced String
              | Link String [String]
-             | TracTicketLink Int
-             | CommentLink (Maybe Int) Int
+             | TracTicketLink Int (Maybe [String])
+             | CommentLink (Maybe Int) Int (Maybe [String])
              | Anchor
              | Image
              | Comment
@@ -93,8 +93,8 @@ inline = inlineNoNL <|> endline
 inlineNoNL :: Parser Inline
 inlineNoNL = do
              --getInput >>= traceShowM
-             choice [ tracTicketLink
-                    , commentLink
+             choice [ commentLink
+                    , tracTicketLink
                     , bold
                     , italic
                     , link
@@ -148,13 +148,27 @@ number :: Parser Int
 number = read <$> some (oneOf "0123456789")
 
 tracTicketLink :: Parser Inline
-tracTicketLink = try $ TracTicketLink <$> (char '#' *> number)
+tracTicketLink = 
+  try $ TracTicketLink <$> (char '#' *> number) <*> return Nothing
 
 commentLink :: Parser Inline
-commentLink = do
-  mn <- optional (string "ticket:" *> number <* char '#')
-  c  <- string "comment:" *> number
-  return $ CommentLink mn c
+commentLink = commentTicketLink <|> ticketCommentLink
+
+commentTicketLink :: Parser Inline
+commentTicketLink = do
+  c  <- try $ string "comment:" *> number
+  mn <- optional (string ":ticket:" *> number)
+  return $ CommentLink mn c Nothing
+
+ticketCommentLink :: Parser Inline
+ticketCommentLink = do
+  n <- try $ string "ticket:" *> number
+  mc  <- optional (try (string "#comment:") *> number)
+  case mc of
+    Nothing ->
+      return $ TracTicketLink n Nothing
+    Just c ->
+      return $ CommentLink (Just n) c Nothing
 
 
 blankline = oneOf "\n\r"
@@ -325,16 +339,55 @@ printList _ (Para is) = concatMap printInlines is
 printInlines (Str s) = s
 printInlines Space = " "
 
-url :: Parser String
-url = manyTill anyChar spaceChar
-
 link :: Parser Inline
-link = try $ do
-  char '['
-  l <- url
-  desc <- words <$> manyTill (noneOf "]\n") (char ']')
-  return $ Link l desc
+link = longhandLink <|> shorthandLink
 
+shorthandLink :: Parser Inline
+shorthandLink = do
+  try (char '[')
+  l <- many (noneOf "]\n ")
+  f <- makeLink l
+  desc <- words <$> manyTill (noneOf "]\n") (char ']')
+  return $ f desc
+
+longhandLink :: Parser Inline
+longhandLink = do
+  try (string "[[")
+  l <- manyTill anyChar (char '|')
+  f <- makeLink l
+  desc <- words <$> manyTill (noneOf "]\n") (string "]]")
+  return $ f desc
+
+emptyToNothing :: [a] -> Maybe [a]
+emptyToNothing [] = Nothing
+emptyToNothing xs = Just xs
+
+makeLink :: String -> Parser ([String] -> Inline)
+makeLink =
+  parseFromString
+    ( try makeCommentLink
+    <|> try makeTicketLink
+    <|> try makeTicketLink
+    <|> makeWebLink
+    )
+  where
+    makeCommentLink = do
+      commentNumber <- try (string "comment:") *> number
+      ticketNumber <- optional (try (string ":ticket:") *> number)
+      eof
+      return $ CommentLink ticketNumber commentNumber . emptyToNothing
+    makeTicketLink = do
+      ticketNumber <- try (string "ticket:") *> number
+      commentNumberMay <- optional (try (string "#comment:") *> number)
+      eof
+      case commentNumberMay of
+        Nothing ->
+          return $ TracTicketLink ticketNumber . emptyToNothing
+        Just commentNumber ->
+          return $ CommentLink (Just ticketNumber) commentNumber . emptyToNothing
+    makeWebLink = do
+      url <- manyTill anyChar eof
+      return $ Link url
 
 
 

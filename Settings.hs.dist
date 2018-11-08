@@ -9,6 +9,9 @@ import Data.ByteString (ByteString)
 project :: ProjectId
 project = ProjectId 1
 
+gitlabOrganisation = "ghc"
+gitlabProjectName = "ghc"
+
 -- | TLS Settings; disable certificate validation when testing against a GitLab
 -- instance that uses a snakeoil TLS cert.
 tlsSettings :: TLSSettings

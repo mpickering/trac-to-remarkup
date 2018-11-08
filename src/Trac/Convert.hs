@@ -8,15 +8,15 @@ import Debug.Trace
 import Data.Maybe
 
 
-convert :: Int -> CommentMap -> String -> String
-convert n cm s =
-    writeRemarkup
+convert :: String -> String -> Int -> CommentMap -> String -> String
+convert org proj n cm s =
+    writeRemarkup org proj
     $ convertBlocks n cm
     $ either (\err -> [R.Para [R.Str "NO PARSE: ", R.Str $ show err, R.Str s]]) id
     $ R.parseTrac
     $ s
 
-convertWithError n cm s = writeRemarkup . convertBlocks n cm <$> R.parseTrac s
+convertWithError org proj n cm s = writeRemarkup org proj . convertBlocks n cm <$> R.parseTrac s
 
 convertBlocks :: Int -> CommentMap -> [R.Block] -> [Block]
 convertBlocks n cm = map (convertBlock n cm)
@@ -71,10 +71,12 @@ convertInline n cm (R.Link url is) = WebLink (intersperse Space (map Str is)) ur
 convertInline n cm (R.Str s) = Str s
 convertInline _ _ (R.LineBreak)  = LineBreak
 convertInline _ _ (R.Space)      = Space
-convertInline _ _ (R.TracTicketLink n) = TicketLink n Nothing
-convertInline n cm (R.CommentLink mt c) =
+convertInline _ _ (R.TracTicketLink n desc) =
+  TicketLink (fmap (map Str) desc) n Nothing
+convertInline n cm (R.CommentLink mt c mlabel) =
   let ticketN = fromMaybe n mt
+      mlabelInline = fmap (map Str) mlabel
   in case M.lookup (ticketN, c) cm of
-      Just t -> TicketLink ticketN (Just t)
-      Nothing -> traceShow ("COULD NOT FIND", n, mt, c, cm) (TicketLink ticketN Nothing)
+      Just t -> TicketLink mlabelInline ticketN (Just t)
+      Nothing -> traceShow ("COULD NOT FIND", n, mt, c, cm) (TicketLink mlabelInline ticketN Nothing)
 convertInline _ _ e = error $ "not handled"  ++ show e

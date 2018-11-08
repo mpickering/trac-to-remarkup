@@ -6,8 +6,20 @@ import Data.List
 import qualified Data.Text as T
 import Trac.Pretty
 import qualified Data.Map as M
+import Control.Monad.Reader
 
 type CommentMap = M.Map (Int, Int) Int
+
+data Context
+  = Context
+      { ctxOrg :: String
+      , ctxProject :: String
+      }
+
+type W a = Reader Context a
+
+runW :: Context -> W a -> a
+runW = flip runReader
 
 data Inline = Bold Inlines
              | Italic Inlines
@@ -16,13 +28,16 @@ data Inline = Bold Inlines
              | Underlined Inlines
              | Highlighted Inlines
              | ObjectLink Ref
-             | TicketLink Int (Maybe Int) -- Potential comment
+             | TicketLink
+                  (Maybe Inlines) -- ^ label
+                  Int -- ^ ticket number
+                  (Maybe Int) -- ^ comment number
              | Str String
              | Space
              | ImageLink
              | UserMention
              | ProjectMention
-             | WikiLink
+             | WikiLink (Maybe Inlines)
              | WebLink Inlines String
              | LineBreak
 
@@ -54,35 +69,41 @@ tableCellContents (TableCell is) = is
 tableCellContents (TableHeaderCell is) = is
 
 
-writeRemarkup :: [Block] -> String
-writeRemarkup = render (Just 80) . blocks
+writeRemarkup :: String -> String -> [Block] -> String
+writeRemarkup org project =
+  render (Just 80) . runW (Context org project) . blocks
 
-blocks bs = (foldr (<>) empty (intersperse blankline (map block bs)))
+blocks :: [Block] -> W Doc
+blocks bs =
+  foldr (<>) empty . intersperse blankline <$> mapM block bs
 
 repeatP :: Int -> Doc -> Doc
 repeatP n s = foldr (<>) empty (replicate n s)
 
-equals = char  '='
+equals = char '='
 
-block :: Block -> Doc
-block (Header n h bs)
-  = repeatP n (char '#') <+> inlines h $+$ blocks bs
-block (Quote is)    =
-  prefixed "> " (blocks is)
-block (Para is)     = inlines is
-block (List s iss)   =
-  vcat (map (oneListItem "-") iss)
+block :: Block -> W Doc
+block (Header n h bs) = do
+  let level = repeatP n (char '#')
+  heading <- inlines h
+  body <- blocks bs
+  return $ level <+> heading $+$ body
+block (Quote is) =
+  prefixed "> " <$> blocks is
+block (Para is) = inlines is
+block (List s iss) =
+  vcat <$> mapM (oneListItem "-") iss
 block (CodeBlock ml s) =
-  vcat [text "```" <> mlang, text s, text "```"]
+  return $ vcat [text "```" <> mlang, text s, text "```"]
   where
     mlang = case ml of
       Just lang -> text lang
-      Nothing   -> empty
+      Nothing -> empty
 block (Table rs) =
   table rs
-block HorizontalLine = text "---"
+block HorizontalLine = return $ text "---"
 
-table :: [TableRow] -> Doc
+table :: [TableRow] -> W Doc
 table rs
   | isProper rs = niceTable rs'
   | otherwise = htmlTable rs'
@@ -105,8 +126,8 @@ isHeaderCell (TableHeaderCell {}) = True
 isHeaderCell (TableCell {}) = False
 
 -- | Render a \"nice\" table (native remarkup)
-niceTable :: [TableRow] -> Doc
-niceTable = vcat . map niceRow
+niceTable :: [TableRow] -> W Doc
+niceTable = fmap vcat . mapM niceRow
 
 -- | Normalize the table so that all rows have the same column count.
 normalizeTable :: [TableRow] -> [TableRow]
@@ -133,63 +154,86 @@ normalizeTable rows =
               TableCell []
       in take columns $ xs ++ repeat emptyCell
 
-niceRow :: TableRow -> Doc
+niceRow :: TableRow -> W Doc
 niceRow row =
   if isProperHeaderRow row then
-    vcat [ niceRowCells row, niceHeaderUnderline (length row) ]
+    vcat <$> sequence [ niceRowCells row, niceHeaderUnderline (length row) ]
   else
     niceRowCells row
 
-niceHeaderUnderline :: Int -> Doc
+niceHeaderUnderline :: Int -> W Doc
 niceHeaderUnderline n =
-  niceRowRaw (replicate n $ text "-----")
+  return $ niceRowRaw (replicate n $ text "-----")
 
-niceRowCells :: [TableCell] -> Doc
+niceRowCells :: [TableCell] -> W Doc
 niceRowCells cells =
-  niceRowRaw (map (inlines . tableCellContents) cells)
+  niceRowRaw <$> mapM (inlines . tableCellContents) cells
 
 niceRowRaw :: [Doc] -> Doc
 niceRowRaw items =
   cat (text "|" : [ text " " <> i <> text " |" | i <- items ])
 
+htmlElem :: String -> Doc -> Doc
+htmlElem tagName =
+  inside (text ("<" ++ tagName ++ ">")) (text ("</" ++ tagName ++ ">"))
 
 -- | Render an HTML-style table (using HTML tags)
-htmlTable :: [TableRow] -> Doc
+htmlTable :: [TableRow] -> W Doc
 htmlTable rs =
-  vcat [ text "<table>" , htmlTableRows rs , "</table>" ]
+  htmlElem "table" <$> htmlTableRows rs
 
-htmlTableRows :: [TableRow] -> Doc
-htmlTableRows = vcat . map htmlTableRow
+htmlTableRows :: [TableRow] -> W Doc
+htmlTableRows = fmap vcat . mapM htmlTableRow
 
-htmlTableRow :: TableRow -> Doc
-htmlTableRow tr = vcat [ "<tr>", htmlTableCells tr, "</tr>" ]
+htmlTableRow :: TableRow -> W Doc
+htmlTableRow tr =
+  htmlElem "tr" <$> htmlTableCells tr
 
-htmlTableCells :: [TableCell] -> Doc
-htmlTableCells = vcat . map htmlTableCell
+htmlTableCells :: [TableCell] -> W Doc
+htmlTableCells = fmap vcat . mapM htmlTableCell
 
-htmlTableCell :: TableCell -> Doc
-htmlTableCell (TableHeaderCell is) = vcat [ "<th>", inlines is, "</th>" ]
-htmlTableCell (TableCell is) = vcat [ "<td>", inlines is, "</td>" ]
+htmlTableCell :: TableCell -> W Doc
+htmlTableCell (TableHeaderCell is) =
+  htmlElem "th" <$> inlines is
+htmlTableCell (TableCell is) =
+  htmlElem "td" <$> inlines is
 
-oneListItem :: String -> Blocks -> Doc
-oneListItem mark is = text mark $$ nest 4 (blocks is)
+oneListItem :: String -> Blocks -> W Doc
+oneListItem mark is = (text mark $$) . (nest 4) <$> blocks is
 
-inlines = hcat . map inline
+inlines = fmap hcat . mapM inline
 
-inline :: Inline -> Doc
-inline (Bold is) = inside (text "**") (text "**") (inlines is)
-inline (Italic is) = inside (text "//") (text "//") (inlines is)
-inline (Monospaced is) = inside (text "`") (text "`") (text is)
-inline (Deleted is) = inside (text "~~") (text "~~") (inlines is)
-inline (Underlined is) = inside (text "__") (text "__") (inlines is)
-inline (Highlighted is) = inside (text "!!") (text "!!") (inlines is)
-inline (Str str) = text str
-inline Space = space
-inline (WebLink is url) = brackets (inlines is) <> parens (text url)
-inline (ObjectLink Ref) = empty
-inline (ImageLink) = empty
-inline LineBreak = cr
-inline (TicketLink n mc) = char 'T' <> text (show n) <>
-                              maybe empty (\n -> char '#' <> text (show n)) mc
-inline _ = empty
+inline :: Inline -> W Doc
+inline (Bold is) = inside (text "**") (text "**") <$> inlines is
+inline (Italic is) = inside (text "//") (text "//") <$> inlines is
+inline (Monospaced is) = return $ inside (text "`") (text "`") (text is)
+inline (Deleted is) = inside (text "~~") (text "~~") <$> inlines is
+inline (Underlined is) = inside (text "__") (text "__") <$> inlines is
+inline (Highlighted is) = inside (text "!!") (text "!!") <$> inlines is
+inline (Str str) = return $ text str
+inline Space = return $ space
+inline (WebLink is url) = longLink url is
+inline (ObjectLink Ref) = return empty
+inline (ImageLink) = return empty
+inline LineBreak = return cr
 
+inline (TicketLink Nothing n Nothing) =
+  -- shorthand ticket link: we can do this nicely
+  return $ char '#' <> text (show n)
+inline (TicketLink (Just label) n Nothing) = do
+  org <- asks ctxOrg
+  proj <- asks ctxProject
+  let url = "/" <> org <> "/" <> proj <> "/issues/" <> show n
+  longLink url label
+inline (TicketLink (Just label) n (Just c)) = do
+  org <- asks ctxOrg
+  proj <- asks ctxProject
+  let url = "/" <> org <> "/" <> proj <> "/issues/" <> show n <> "#note_" <> show c
+  longLink url label
+
+inline _ = return $ empty
+
+longLink :: String -> [Inline] -> W Doc
+longLink url label =
+  (<>) <$> (brackets <$> inlines label)
+       <*> (parens <$> pure (text url))

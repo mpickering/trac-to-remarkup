@@ -328,7 +328,12 @@ collapseChanges tcs = TicketChange
 
 tracToMarkdown :: TicketNumber -> Text -> Text
 tracToMarkdown (TicketNumber n) src =
-      T.pack $ Trac.Convert.convert (fromIntegral n) mempty (T.unpack src)
+      T.pack $ Trac.Convert.convert
+        gitlabOrganisation
+        gitlabProjectName
+        (fromIntegral n)
+        mempty
+        (T.unpack src)
 
 createTicket :: MilestoneMap -> UserIdOracle
              -> Ticket -> ClientM IssueIid
