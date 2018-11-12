@@ -102,7 +102,7 @@ findUserByUsername tok username = do
 
 type FindUserByEmailAPI =
     GitLabRoot :> "users"
-    :> QueryParam "email" Text
+    :> QueryParam "search" Text
     :> Get '[JSON] [User]
 
 findUserByEmail :: AccessToken -> Text -> ClientM (Maybe User)

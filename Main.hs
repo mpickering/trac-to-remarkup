@@ -208,18 +208,25 @@ mkUserIdOracle clientEnv = do
     let runIt :: Username -> StateT UserIdCache IO (Maybe UserId)
         runIt username = StateT $ \cache -> do
             res <- runClientM (runStateT (runMaybeT $ getUserId $ T.strip username) cache) clientEnv
+            liftIO $ putStrLn $ "Resolve user " ++ show username ++ " -> " ++ show res
             either throwM pure res
     return $ liftIO
            . fmap (fromMaybe $ error "couldn't resolve user id")
            . withMVarState cacheVar
            . runIt
   where
+    tee :: (Show a, Monad m, MonadIO m) => String -> m a -> m a
+    tee msg a = do
+      x <- a
+      liftIO . putStrLn $ msg ++ show x
+      return x
+
     getUserId :: Username -> UserLookupM UserId
     getUserId username =
-            tryCache
-        <|> cacheIt tryLookupName
-        <|> cacheIt tryLookupEmail
-        <|> cacheIt tryCreate
+            tee "tryCache" tryCache
+        <|> cacheIt (tee "tryLookupName - " tryLookupName)
+        <|> cacheIt (tee "tryLookupEmail - " tryLookupEmail)
+        <|> cacheIt (tee "tryCreate - " tryCreate)
       where
         cuUsername
           | Just u <- M.lookup username knownUsers = u
@@ -231,13 +238,15 @@ mkUserIdOracle clientEnv = do
             MaybeT $ pure $ M.lookup username cache
 
         tryLookupName :: UserLookupM UserId
-        tryLookupName =
+        tryLookupName = do
+            liftIO . putStrLn $ "Find by username: " ++ T.unpack cuUsername
             fmap userId $ MaybeT $ lift $ findUserByUsername gitlabToken cuUsername
 
         tryLookupEmail :: UserLookupM UserId
         tryLookupEmail = do
             let cuEmail = "trac+"<>cuUsername<>"@haskell.org"
-            fmap userId $ MaybeT $ lift $ findUserByEmail gitlabToken cuEmail
+            liftIO . putStrLn $ "Find by email: " ++ T.unpack cuEmail
+            fmap userId $ MaybeT $ lift $ tee "user by email" $ findUserByEmail gitlabToken cuEmail
 
         tryCreate :: UserLookupM UserId
         tryCreate = do
