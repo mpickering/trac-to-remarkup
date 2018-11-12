@@ -7,6 +7,7 @@ import qualified Data.Text as T
 import Trac.Pretty
 import qualified Data.Map as M
 import Control.Monad.Reader
+import Data.Maybe (fromMaybe)
 
 type CommentMap = M.Map (Int, Int) Int
 
@@ -23,7 +24,7 @@ runW = flip runReader
 
 data Inline = Bold Inlines
              | Italic Inlines
-             | Monospaced String
+             | Monospaced (Maybe String) String
              | Deleted Inlines
              | Underlined Inlines
              | Highlighted Inlines
@@ -206,7 +207,7 @@ inlines = fmap hcat . mapM inline
 inline :: Inline -> W Doc
 inline (Bold is) = inside (text "**") (text "**") <$> inlines is
 inline (Italic is) = inside (text "//") (text "//") <$> inlines is
-inline (Monospaced is) = return $ inside (text "`") (text "`") (text is)
+inline (Monospaced _ is) = return $ inside (text "`") (text "`") (text is)
 inline (Deleted is) = inside (text "~~") (text "~~") <$> inlines is
 inline (Underlined is) = inside (text "__") (text "__") <$> inlines is
 inline (Highlighted is) = inside (text "!!") (text "!!") <$> inlines is
@@ -220,16 +221,16 @@ inline LineBreak = return cr
 inline (TicketLink Nothing n Nothing) =
   -- shorthand ticket link: we can do this nicely
   return $ char '#' <> text (show n)
-inline (TicketLink (Just label) n Nothing) = do
+inline (TicketLink mlabel n Nothing) = do
   org <- asks ctxOrg
   proj <- asks ctxProject
   let url = "/" <> org <> "/" <> proj <> "/issues/" <> show n
-  longLink url label
-inline (TicketLink (Just label) n (Just c)) = do
+  longLink url $ fromMaybe [Str url] mlabel
+inline (TicketLink mlabel n (Just c)) = do
   org <- asks ctxOrg
   proj <- asks ctxProject
   let url = "/" <> org <> "/" <> proj <> "/issues/" <> show n <> "#note_" <> show c
-  longLink url label
+  longLink url $ fromMaybe [Str url] mlabel
 
 inline _ = return $ empty
 

@@ -59,7 +59,7 @@ instance IsString Labels where
 instance ToJSON Labels where
     toJSON (Labels lbls) = toJSON $ T.intercalate "," (S.toList lbls)
 
-newtype IssueIid = IssueIid Int
+newtype IssueIid = IssueIid { unIssueIid :: Int }
                  deriving (Eq, Ord, Show, ToJSON, FromJSON, ToHttpApiData)
 
 type GitLabRoot = Header "Private-Token" AccessToken

@@ -38,7 +38,7 @@ normaliseNewlines [] =  "\n"
 data Inline = Bold Inlines
              | Italic Inlines
              | WikiStyle Inlines
-             | Monospaced String
+             | Monospaced Type String
              | Link String [String]
              | TracTicketLink Int (Maybe [String])
              | CommentLink (Maybe Int) Int (Maybe [String])
@@ -125,12 +125,13 @@ inlineMarkup n = try $ do
 
 monospaced :: Parser Inline
 monospaced =
-  Monospaced <$> try (between (char '`') (char '`')
+  Monospaced Nothing <$> try (between (char '`') (char '`')
                   (someTill anyChar (lookAhead $ char '`')))
 
 monospaced2 :: Parser Inline
-monospaced2 = Monospaced <$> try (between (string "{{{") (string "}}}")
-                                (someTill anyChar (lookAhead $ string "}}}")))
+monospaced2 = try . between (string "{{{") (string "}}}") $ do
+  Monospaced <$> (optional $ try (string "#!") *> word <* skipSpaces)
+             <*> someTill anyChar (lookAhead $ string "}}}")
 
 str :: Parser Inline
 str = Str <$> some (noneOf (reservedChars ++ "\n\r"))
@@ -187,13 +188,24 @@ endline = try $ do
 skipSpaces :: Parser ()
 skipSpaces = () <$ many (oneOf " \t")
 
-blocks = manyTill (block <* many blankline) eof
+blocks =
+  try (many blankline *> eof *> return []) <|>
+  (manyTill (block <* many blankline) eof)
 
 block :: Parser Block
 block = do
   many blankline
   getInput >>= \s -> traceM "block" >>=  \_ -> traceShowM s
-  r <- choice [table, pList, discussion, blockQuote, literalBlock, defnList,header, para]
+  r <- choice
+          [ table
+          , pList
+          , discussion
+          , blockQuote
+          , literalBlock
+          , defnList
+          , header
+          , para
+          ]
   many blankline
   traceShowM r
   getInput >>= traceShowM
@@ -288,7 +300,7 @@ table = try $ do
   
 tableRow :: Parser TableRow
 tableRow = do
-  string "||" *> many tableCell <* newline
+  try (string "||") *> many tableCell <* newline
 
 tableCell :: Parser TableCell
 tableCell = tableHeaderCell <|> tableRegularCell

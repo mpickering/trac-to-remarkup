@@ -50,6 +50,7 @@ import GitLab.Users
 import qualified Trac.Web
 import Trac.Db as Trac
 import Trac.Db.Types as Trac
+import Trac.Convert (LookupComment)
 import qualified Trac.Convert
 import Settings
 
@@ -80,6 +81,8 @@ ticketStateFile = "tickets.state"
 mutationStateFile :: FilePath
 mutationStateFile = "mutations.state"
 
+type CommentCache = MVar (M.Map Int [Int])
+
 main :: IO ()
 main = do
     args <- getArgs
@@ -91,7 +94,7 @@ main = do
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- mkUserIdOracle env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
-
+    commentCache <- newMVar mempty
 
     (finishedMutations, finishMutation) <- openStateFile mutationStateFile
 
@@ -100,12 +103,12 @@ main = do
                  filter (\m -> ticketMutationTicket m `S.member` ticketNumbers || S.null ticketNumbers)
                  <$> Trac.getTicketMutations conn
     let makeMutations' ts = do
-            runClientM (makeMutations conn milestoneMap getUserId finishMutation ts) env >>= print
+            runClientM (makeMutations conn milestoneMap getUserId commentCache finishMutation ts) env >>= print
             putStrLn "makeMutations' done"
     makeMutations' mutations
 
-    putStrLn "Making attachments"
-    runClientM (makeAttachments conn getUserId) env >>= print
+    -- putStrLn "Making attachments"
+    -- runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
 divide n xs = map f [0..n-1]
@@ -308,18 +311,20 @@ makeAttachments conn getUserId = do
 makeMutations :: Connection
               -> MilestoneMap
               -> UserIdOracle
+              -> CommentCache
               -> (TicketMutation -> IO ())
               -> [Trac.TicketMutation]
               -> ClientM ()
-makeMutations conn milestoneMap getUserId finishMutation mutations = do
+makeMutations conn milestoneMap getUserId commentCache finishMutation mutations = do
   mapM_ makeMutation' mutations
   where
     makeMutation' m = handleAll onError $ flip catchError onError $ do
+      liftIO $ print m
       case ticketMutationType m of
         -- Create a new ticket
         Trac.CreateTicket -> do
           ticket <- liftIO $ fromMaybe (error "Ticket not found") <$> Trac.getTicket (ticketMutationTicket m) conn
-          iid@(IssueIid issueID) <- createTicket milestoneMap getUserId ticket
+          iid@(IssueIid issueID) <- createTicket milestoneMap getUserId commentCache ticket
           if ((fromIntegral . getTicketNumber . ticketNumber $ ticket) == issueID)
             then
               (liftIO $ finishMutation m)
@@ -330,33 +335,13 @@ makeMutations conn milestoneMap getUserId finishMutation mutations = do
         Trac.ChangeTicket -> do
           changes <- liftIO $ Trac.getTicketChanges conn (ticketMutationTicket m) (Just $ ticketMutationTime m)
           let iid = IssueIid (fromIntegral . getTicketNumber . ticketMutationTicket $ m)
-          createTicketChanges milestoneMap getUserId iid . collapseChanges $ changes
+          createTicketChanges milestoneMap getUserId commentCache iid . collapseChanges $ changes
           liftIO $ finishMutation m
 
       where
         onError :: (MonadIO m, Show a) => a -> m ()
         onError err =
-            liftIO $ putStrLn $ "Failed to create ticket: " ++ show err
-
-makeTickets :: Connection
-            -> MilestoneMap
-            -> UserIdOracle
-            -> (Ticket -> IO ())
-            -> [Trac.Ticket]
-            -> ClientM ()
-makeTickets conn milestoneMap getUserId finishTicket tickets = do
-    mapM_ createTicket' tickets
-  where
-    createTicket' t = handleAll onError $ flip catchError onError $ do
-        iid <- createTicket milestoneMap getUserId t
-        tcs <- liftIO $ Trac.getTicketChanges conn (ticketNumber t) Nothing
-        let groups = groupBy ((==) `on` (\tc -> (changeTime tc, changeAuthor tc))) tcs
-        mapM_ (createTicketChanges milestoneMap getUserId iid . collapseChanges) groups
-        liftIO $ finishTicket t
-      where
-        onError :: (MonadIO m, Show a) => a -> m ()
-        onError err =
-            liftIO $ putStrLn $ "Failed to create ticket " ++ show t ++ ": " ++ show err
+            liftIO $ putStrLn $ "Failed to execute ticket mutation: " ++ show err
 
 collapseChanges :: [TicketChange] -> TicketChange
 collapseChanges tcs = TicketChange
@@ -366,29 +351,40 @@ collapseChanges tcs = TicketChange
     , changeComment = listToMaybe $ catMaybes $ map changeComment tcs
     }
 
-tracToMarkdown :: TicketNumber -> Text -> Text
-tracToMarkdown (TicketNumber n) src =
-      T.pack $ Trac.Convert.convert
+tracToMarkdown :: CommentCache -> TicketNumber -> Text -> IO Text
+tracToMarkdown commentCache (TicketNumber n) src =
+      T.pack <$> Trac.Convert.convert
         gitlabOrganisation
         gitlabProjectName
         (fromIntegral n)
-        mempty
+        getCommentId
         (T.unpack src)
+      where
+        getCommentId t c = ((>>= nthMay (c - 1)) . M.lookup t <$> readMVar commentCache)
 
-createTicket :: MilestoneMap -> UserIdOracle
-             -> Ticket -> ClientM IssueIid
-createTicket milestoneMap getUserId t = do
+nthMay :: Int -> [a] -> Maybe a
+nthMay n = listToMaybe . drop n
+
+createTicket :: MilestoneMap
+             -> UserIdOracle
+             -> CommentCache
+             -> Ticket
+             -> ClientM IssueIid
+createTicket milestoneMap getUserId commentCache t = do
     liftIO $ print $ ticketNumber t
     creatorUid <- getUserId $ ticketCreator t
+    descriptionBody <- liftIO $
+          tracToMarkdown commentCache (ticketNumber t) $
+          runIdentity $
+          ticketDescription (ticketFields t)
     let extraRows = [] -- [ ("Reporter", ticketCreator t) ]
         description = T.unlines
-            [ tracToMarkdown (ticketNumber t) $ runIdentity $ ticketDescription (ticketFields t)
+            [ descriptionBody
             , ""
             , fieldsTable extraRows fields
             ]
         fields = ticketFields t
-        iid = case ticketNumber t of
-                TicketNumber n -> IssueIid $ fromIntegral n
+        iid = ticketNumberToIssueIid $ ticketNumber t
         issue = CreateIssue { ciIid = Just iid
                             , ciTitle = runIdentity $ ticketSummary fields
                             , ciLabels = Just $ fieldLabels $ hoistFields (Just . runIdentity) fields
@@ -397,36 +393,54 @@ createTicket milestoneMap getUserId t = do
                             , ciMilestoneId = Just $ M.lookup (runIdentity $ ticketMilestone fields) milestoneMap
                             , ciWeight = Just $ prioToWeight $ runIdentity $ ticketPriority fields
                             }
-    let handle404 (FailureResponse resp)
+    let ignore404 (FailureResponse resp)
           | 404 <- statusCode $ responseStatusCode resp
           = return ()
-        handle404 e
+        ignore404 e
           = throwError e
-    deleteIssue gitlabToken Nothing project iid `catchError` handle404
+    deleteIssue gitlabToken Nothing project iid `catchError` ignore404
     ir <- createIssue gitlabToken (Just creatorUid) project issue
     liftIO $ print ir
     return $ irIid ir
 
-createTicketChanges :: MilestoneMap -> UserIdOracle
-                    -> IssueIid -> TicketChange -> ClientM ()
-createTicketChanges milestoneMap getUserId iid tc = do
+ticketNumberToIssueIid (TicketNumber n) =
+  IssueIid $ fromIntegral n
+
+createTicketChanges :: MilestoneMap
+                    -> UserIdOracle
+                    -> CommentCache
+                    -> IssueIid
+                    -> TicketChange
+                    -> ClientM ()
+createTicketChanges milestoneMap getUserId commentCache iid tc = do
+    liftIO $ print tc
     authorUid <- getUserId $ changeAuthor tc
+    let t = case iid of IssueIid n -> TicketNumber $ fromIntegral n
+    rawBody <- liftIO $ tracToMarkdown commentCache t $ fromMaybe "*intentionally left blank due to Trac import*" $ changeComment tc
     let body = T.unlines
-            [ tracToMarkdown ticketNumber $ fromMaybe mempty $ changeComment tc
+            [ rawBody
             , ""
-            , fieldsTable {-[("User", changeAuthor tc)]-} [] (changeFields tc)
+            , fieldsTable [("User", changeAuthor tc)] (changeFields tc)
             ]
         note = CreateIssueNote { cinBody = body
                                , cinCreatedAt = Just $ changeTime tc
                                }
-        ticketNumber = case iid of IssueIid n -> TicketNumber $ fromIntegral n
 
     case changeComment tc of
-      Just c | not $ T.null $ T.strip c ->
-               void $ createIssueNote gitlabToken (Just authorUid) project iid note
+      -- Just c | not $ T.null $ T.strip c -> do
+      Just c -> do
+               liftIO $ putStrLn $ "NOTE: " ++ show c
+               cinResp <- createIssueNote gitlabToken (Just authorUid) project iid note
+               liftIO $ putStrLn $ "NOTE CREATED: " ++ show cinResp
+               liftIO $ do
+                modifyMVar_ commentCache $
+                  return .
+                  M.insertWith (flip (++)) (unIssueIid iid) [inrId cinResp]
+                (M.lookup (unIssueIid iid) <$> readMVar commentCache) >>= print
       _ -> return ()
 
-    let status = case ticketStatus $ changeFields tc of
+    let fields = changeFields tc
+    let status = case ticketStatus fields of
                    Nothing         -> Nothing
                    Just New        -> Just ReopenEvent
                    Just Assigned   -> Just ReopenEvent
@@ -440,9 +454,12 @@ createTicketChanges milestoneMap getUserId iid tc = do
         notNull (Just s) | T.null s = Nothing
         notNull s = s
 
-        fields = changeFields tc
-        edit = EditIssue { eiTitle = notNull $ ticketSummary fields
-                         , eiDescription = tracToMarkdown ticketNumber <$> ticketDescription fields
+    description <-
+          liftIO $
+          maybe (return $ Nothing) (fmap Just . tracToMarkdown commentCache t) $
+          ticketDescription fields
+    let edit = EditIssue { eiTitle = notNull $ ticketSummary fields
+                         , eiDescription = description
                          , eiMilestoneId = fmap (`M.lookup` milestoneMap) (ticketMilestone fields)
                          , eiLabels = Just $ fieldLabels fields
                          , eiStatus = status
