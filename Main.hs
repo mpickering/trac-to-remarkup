@@ -71,6 +71,26 @@ openStateFile stateFile = do
         finishItem = hPutStrLn stateFile . show
     return (finished, finishItem)
 
+openCommentCacheFile :: FilePath -> IO (CommentCacheVar, Int -> Int -> IO ())
+openCommentCacheFile stateFile = do
+    stateFileExists <- doesFileExist stateFile
+    !cacheEntries <-
+        if stateFileExists
+        then map read . lines <$> readFile stateFile
+        else return []
+
+    let storeItem :: Int -> Int -> IO ()
+        storeItem t n = do
+          stateFile <- openFile stateFile AppendMode
+          hSetBuffering stateFile LineBuffering
+          hPutStrLn stateFile $! show (t, n)
+          hClose stateFile
+
+    cache <- newMVar $! foldr'
+              (\(t,n) -> M.insertWith (flip (++)) t [n])
+              mempty
+              cacheEntries
+    return (cache, storeItem)
 
 attachmentStateFile :: FilePath
 attachmentStateFile = "attachments.state"
@@ -81,7 +101,12 @@ ticketStateFile = "tickets.state"
 mutationStateFile :: FilePath
 mutationStateFile = "mutations.state"
 
-type CommentCache = MVar (M.Map Int [Int])
+commentCacheFile :: FilePath
+commentCacheFile = "comments.state"
+
+type CommentCacheVar = MVar (M.Map Int [Int])
+
+type CommentCache = (M.Map Int [Int])
 
 main :: IO ()
 main = do
@@ -94,16 +119,26 @@ main = do
     let env = mkClientEnv mgr gitlabBaseUrl
     getUserId <- mkUserIdOracle env
     milestoneMap <- either (error . show) id <$> runClientM (makeMilestones conn) env
-    commentCache <- newMVar mempty
 
     (finishedMutations, finishMutation) <- openStateFile mutationStateFile
+
+    (commentCache, storeComment) <- openCommentCacheFile commentCacheFile
 
     putStrLn "Making tickets"
     mutations <- filter (\m -> not $ m `S.member` finishedMutations) .
                  filter (\m -> ticketMutationTicket m `S.member` ticketNumbers || S.null ticketNumbers)
                  <$> Trac.getTicketMutations conn
     let makeMutations' ts = do
-            runClientM (makeMutations conn milestoneMap getUserId commentCache finishMutation ts) env >>= print
+            runClientM
+              (makeMutations
+                conn
+                milestoneMap
+                getUserId
+                commentCache
+                finishMutation
+                storeComment
+                ts)
+              env >>= print
             putStrLn "makeMutations' done"
     makeMutations' mutations
 
@@ -311,11 +346,12 @@ makeAttachments conn getUserId = do
 makeMutations :: Connection
               -> MilestoneMap
               -> UserIdOracle
-              -> CommentCache
+              -> CommentCacheVar
               -> (TicketMutation -> IO ())
+              -> (Int -> Int -> IO ())
               -> [Trac.TicketMutation]
               -> ClientM ()
-makeMutations conn milestoneMap getUserId commentCache finishMutation mutations = do
+makeMutations conn milestoneMap getUserId commentCache finishMutation storeComment mutations = do
   mapM_ makeMutation' mutations
   where
     makeMutation' m = handleAll onError $ flip catchError onError $ do
@@ -335,7 +371,12 @@ makeMutations conn milestoneMap getUserId commentCache finishMutation mutations 
         Trac.ChangeTicket -> do
           changes <- liftIO $ Trac.getTicketChanges conn (ticketMutationTicket m) (Just $ ticketMutationTime m)
           let iid = IssueIid (fromIntegral . getTicketNumber . ticketMutationTicket $ m)
-          createTicketChanges milestoneMap getUserId commentCache iid . collapseChanges $ changes
+          createTicketChanges
+            milestoneMap
+            getUserId
+            commentCache
+            storeComment
+            iid . collapseChanges $ changes
           liftIO $ finishMutation m
 
       where
@@ -351,7 +392,7 @@ collapseChanges tcs = TicketChange
     , changeComment = listToMaybe $ catMaybes $ map changeComment tcs
     }
 
-tracToMarkdown :: CommentCache -> TicketNumber -> Text -> IO Text
+tracToMarkdown :: CommentCacheVar -> TicketNumber -> Text -> IO Text
 tracToMarkdown commentCache (TicketNumber n) src =
       T.pack <$> Trac.Convert.convert
         gitlabOrganisation
@@ -367,7 +408,7 @@ nthMay n = listToMaybe . drop n
 
 createTicket :: MilestoneMap
              -> UserIdOracle
-             -> CommentCache
+             -> CommentCacheVar
              -> Ticket
              -> ClientM IssueIid
 createTicket milestoneMap getUserId commentCache t = do
@@ -408,11 +449,12 @@ ticketNumberToIssueIid (TicketNumber n) =
 
 createTicketChanges :: MilestoneMap
                     -> UserIdOracle
-                    -> CommentCache
+                    -> CommentCacheVar
+                    -> (Int -> Int -> IO ())
                     -> IssueIid
                     -> TicketChange
                     -> ClientM ()
-createTicketChanges milestoneMap getUserId commentCache iid tc = do
+createTicketChanges milestoneMap getUserId commentCache storeComment iid tc = do
     liftIO $ print tc
     authorUid <- getUserId $ changeAuthor tc
     let t = case iid of IssueIid n -> TicketNumber $ fromIntegral n
@@ -436,6 +478,7 @@ createTicketChanges milestoneMap getUserId commentCache iid tc = do
                 modifyMVar_ commentCache $
                   return .
                   M.insertWith (flip (++)) (unIssueIid iid) [inrId cinResp]
+                storeComment (unIssueIid iid) (inrId cinResp)
                 (M.lookup (unIssueIid iid) <$> readMVar commentCache) >>= print
       _ -> return ()
 
