@@ -25,6 +25,7 @@ import Data.Foldable
 import Data.Function
 import Data.Functor.Identity
 import Data.List
+import Data.String
 import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Set as S
@@ -381,11 +382,11 @@ makeMutations conn milestoneMap getUserId commentCache finishMutation storeComme
           changes <- liftIO $ Trac.getTicketChanges conn (ticketMutationTicket m) (Just $ ticketMutationTime m)
           let iid = IssueIid (fromIntegral . getTicketNumber . ticketMutationTicket $ m)
           createTicketChanges
-            milestoneMap
-            getUserId
-            commentCache
-            storeComment
-            iid . collapseChanges $ changes
+              milestoneMap
+              getUserId
+              commentCache
+              storeComment
+              iid $ collapseChanges changes
           liftIO $ finishMutation m
 
       where
@@ -467,29 +468,34 @@ createTicketChanges milestoneMap getUserId commentCache storeComment iid tc = do
     liftIO $ print tc
     authorUid <- getUserId $ changeAuthor tc
     let t = case iid of IssueIid n -> TicketNumber $ fromIntegral n
-    rawBody <- liftIO $ tracToMarkdown commentCache t $ fromMaybe "*intentionally left blank due to Trac import*" $ changeComment tc
+    commentNumber <- liftIO $ do
+      items <- M.lookup (unIssueIid iid) <$> readMVar commentCache
+      case items of
+        Nothing -> return 1
+        Just xs -> return (length xs + 1)
+    rawBody <- liftIO $ tracToMarkdown commentCache t $ fromMaybe "(no text)" $ changeComment tc
     let body = T.unlines
             [ rawBody
             , ""
-            , fieldsTable [("User", changeAuthor tc)] (changeFields tc)
+            , "(Trac comment: " <> (T.pack . show) commentNumber <> ")"
+            , fieldsTable
+                []
+                -- [ ("User", changeAuthor tc) -- ]
+                (changeFields tc)
             ]
         note = CreateIssueNote { cinBody = body
                                , cinCreatedAt = Just $ changeTime tc
                                }
 
-    case changeComment tc of
-      -- Just c | not $ T.null $ T.strip c -> do
-      Just c -> do
-               liftIO $ putStrLn $ "NOTE: " ++ show c
-               cinResp <- createIssueNote gitlabToken (Just authorUid) project iid note
-               liftIO $ putStrLn $ "NOTE CREATED: " ++ show cinResp
-               liftIO $ do
-                modifyMVar_ commentCache $
-                  return .
-                  M.insertWith (flip (++)) (unIssueIid iid) [inrId cinResp]
-                storeComment (unIssueIid iid) (inrId cinResp)
-                (M.lookup (unIssueIid iid) <$> readMVar commentCache) >>= print
-      _ -> return ()
+    liftIO $ putStrLn $ "NOTE: " ++ show body
+    cinResp <- createIssueNote gitlabToken (Just authorUid) project iid note
+    liftIO $ putStrLn $ "NOTE CREATED: " ++ show cinResp
+    liftIO $ do
+      modifyMVar_ commentCache $
+        return .
+        M.insertWith (flip (++)) (unIssueIid iid) [inrId cinResp]
+      storeComment (unIssueIid iid) (inrId cinResp)
+      (M.lookup (unIssueIid iid) <$> readMVar commentCache) >>= print
 
     let fields = changeFields tc
     let status = case ticketStatus fields of
@@ -630,9 +636,23 @@ fieldsTable extraRows (Fields{..})
     rows =
         catMaybes
         [ row "Version" $ one ticketVersion
+        , row "Type" $ T.pack . show <$> one ticketType
+        , row "TypeOfFailure" $ T.pack . show <$> one ticketTypeOfFailure
+        , row "Priority" $ toPriorityName <$> one ticketPriority
+        , row "Milestone" $ one ticketMilestone
+        , row "Component" $ one ticketComponent
         , row "Test case" $ unless T.null $ one ticketTestCase
         , row "Differential revisions" $ one ticketDifferentials >>= renderTicketDifferentials
+        , row "Status" $ T.pack . show <$> one ticketStatus
+        , row "Description" $ const "description changed" <$> one ticketDescription
+        , row "Keywords" $ T.intercalate ", " <$> one ticketKeywords
+        , row "BlockedBy" $ one ticketBlockedBy >>= renderTicketNumbers
+        , row "Related" $ one ticketRelated >>= renderTicketNumbers
+        , row "Blocking" $ one ticketBlocking >>= renderTicketNumbers
         ] ++ extraRows
+
+    formatTicketNumber :: TicketNumber -> Text
+    formatTicketNumber (TicketNumber n) = "#" <> T.pack (show n)
 
     header :: (Text, Text)
     header = ("Trac field", "Value")
@@ -655,6 +675,13 @@ fieldsTable extraRows (Fields{..})
         , " |"
         ]
 
+renderTicketNumbers :: [TicketNumber] -> Maybe Text
+renderTicketNumbers [] = Nothing
+renderTicketNumbers xs = Just . T.intercalate ", " . map toLink $ xs
+  where
+    toLink (TicketNumber n) =
+        T.pack $ "#" ++ show n
+
 renderTicketDifferentials :: [Differential] -> Maybe Text
 renderTicketDifferentials [] = Nothing
 renderTicketDifferentials diffs = Just $ T.intercalate ", " $ map toLink diffs
@@ -669,6 +696,14 @@ toPriorityLabel p = case p of
   PrioNormal  -> "P-normal"
   PrioHigh    -> "P-high"
   PrioHighest -> "P-highest"
+
+toPriorityName :: IsString s => Priority -> s
+toPriorityName p = case p of
+  PrioLowest  -> "lowest"
+  PrioLow     -> "low"
+  PrioNormal  -> "normal"
+  PrioHigh    -> "high"
+  PrioHighest -> "highest"
 
 prioToWeight :: Priority -> Weight
 prioToWeight PrioLowest  = Weight 0
