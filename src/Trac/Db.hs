@@ -209,11 +209,11 @@ getTicketChanges conn n mtime = do
     toChange :: (TracTime, Text, Text, Maybe Text, Maybe Text) -> TicketChange
     toChange (TracTime t, author, field, old, new) =
         case field of
-          "type"         -> fieldChange $ emptyFieldsUpdate{ticketType = mkJustUpdate toTicketType old new}
-          "summary"      -> fieldChange $ emptyFieldsUpdate{ticketSummary = mkJustUpdate id old new}
+          "type"         -> fieldChange $ emptyFieldsUpdate{ticketType = mkUpdate (fmap toTicketType) old new}
+          "summary"      -> fieldChange $ emptyFieldsUpdate{ticketSummary = mkUpdate id old new}
           "description"  -> fieldChange $ emptyFieldsUpdate{ticketDescription = Update old new}
-          "priority"     -> fieldChange $ emptyFieldsUpdate{ticketPriority = mkJustUpdate toPriority old new}
-          "milestone"    -> fieldChange $ emptyFieldsUpdate{ticketMilestone = mkJustUpdate id old new}
+          "priority"     -> fieldChange $ emptyFieldsUpdate{ticketPriority = mkUpdate (fmap toPriority) old new}
+          "milestone"    -> fieldChange $ emptyFieldsUpdate{ticketMilestone = mkUpdate id old new}
           "testcase"     -> fieldChange $ emptyFieldsUpdate{ticketTestCase = mkUpdate id old new}
           "keywords"     -> fieldChange $ emptyFieldsUpdate{ticketKeywords = mkUpdate (fmap T.words) old new}
           "status"       -> fieldChange $ emptyFieldsUpdate{ticketStatus = mkJustUpdate toStatus old new}

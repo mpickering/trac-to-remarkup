@@ -280,7 +280,8 @@ makeMilestones conn = do
         <$> listMilestones gitlabToken project
   where
     createMilestone' :: Trac.Milestone -> ClientM MilestoneMap
-    createMilestone' Trac.Milestone{..} = do
+    createMilestone' Trac.Milestone{..} =
+      handleAll onError $ flip catchError onError $ do
         mid <- createMilestone gitlabToken Nothing project
             $ CreateMilestone { cmTitle = mName
                               , cmDescription = mDescription
@@ -288,6 +289,11 @@ makeMilestones conn = do
                               , cmStartDate = Nothing
                               }
         return $ M.singleton mName mid
+
+    onError :: (MonadIO m, Show a) => a -> m MilestoneMap
+    onError err = do
+        liftIO $ putStrLn $ "Failed to create milestone: " ++ show err
+        return M.empty
 
 makeAttachment :: UserIdOracle -> Attachment -> ClientM ()
 makeAttachment getUserId (Attachment{..})
