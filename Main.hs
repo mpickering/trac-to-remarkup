@@ -275,7 +275,7 @@ mkUserIdOracle clientEnv = do
 makeMilestones :: Connection -> ClientM MilestoneMap
 makeMilestones conn = do
     milestones <- liftIO $ Trac.getMilestones conn
-    --mconcat <$> mapM createMilestone' milestones
+    mconcat <$> mapM createMilestone' milestones
     foldMap (\(GitLab.Tickets.Milestone a b) -> M.singleton a b)
         <$> listMilestones gitlabToken project
   where
@@ -284,7 +284,7 @@ makeMilestones conn = do
         mid <- createMilestone gitlabToken Nothing project
             $ CreateMilestone { cmTitle = mName
                               , cmDescription = mDescription
-                              , cmDueDate = Just mDue
+                              , cmDueDate = mDue
                               , cmStartDate = Nothing
                               }
         return $ M.singleton mName mid

@@ -332,8 +332,8 @@ toTypeOfFailure t = case t of
 
 data Milestone = Milestone { mName :: Text
                            , mDescription :: Text
-                           , mDue :: UTCTime
-                           , mCompleted :: UTCTime
+                           , mDue :: Maybe UTCTime
+                           , mCompleted :: Maybe UTCTime
                            }
 
 getMilestones :: Connection -> IO [Milestone]
@@ -343,8 +343,16 @@ getMilestones conn = do
            FROM milestone
           |]
   where
-    f (mName, TracTime mDue, TracTime mCompleted, mDescription) =
-        Milestone {..}
+    f (mName, mDueTrac, mCompletedTrac, mDescription) =
+        let mDue = tracToUTC <$> nullifyTimestamp mDueTrac
+            mCompleted = tracToUTC <$> nullifyTimestamp mCompletedTrac
+        in Milestone {..}
+
+nullifyTimestamp :: Maybe TracTime -> Maybe TracTime
+nullifyTimestamp Nothing = Nothing
+nullifyTimestamp (Just t@(TracTime u))
+  | u == posixSecondsToUTCTime 0 = Nothing
+  | otherwise = Just t
 
 getAttachments :: Connection -> IO [Attachment]
 getAttachments conn = do

@@ -15,7 +15,7 @@ import qualified Data.Text as T
 import Data.Time.Clock
 import Data.Maybe
 
-newtype TracTime = TracTime UTCTime
+newtype TracTime = TracTime { tracToUTC :: UTCTime }
                  deriving (Eq, Ord, Show)
 
 type RawTime = Integer

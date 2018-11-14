@@ -21,6 +21,7 @@ import Data.Time.Clock
 import Servant.API
 import Servant.Client
 import GitLab.Common
+import Control.Monad.IO.Class (liftIO)
 
 ----------------------------------------------------------------------
 -- getIssue
@@ -250,6 +251,7 @@ data CreateMilestone
                       , cmDueDate :: Maybe UTCTime
                       , cmStartDate :: Maybe UTCTime
                       }
+                      deriving (Show)
 
 instance ToJSON CreateMilestone where
     toJSON CreateMilestone{..} = object
@@ -269,6 +271,7 @@ createMilestone :: AccessToken -> Maybe UserId
                 -> ProjectId -> CreateMilestone
                 -> ClientM MilestoneId
 createMilestone tok sudo prj cm = do
+    liftIO $ putStrLn $ "Create milestone: " ++ show cm
     CreateMilestoneResp mid <- client (Proxy :: Proxy CreateMilestoneAPI) (Just tok) prj cm sudo
     return mid
 
