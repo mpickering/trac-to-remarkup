@@ -128,7 +128,7 @@ collapseFields a b =
 deriving instance Show (Fields Identity)
 deriving instance Show (Fields Maybe)
 
-newtype Differential = Differential Integer
+newtype Differential = Differential { getDifferentialNumber :: Int }
                      deriving (Show)
 
 data Update a = Update { oldValue :: Maybe a, newValue :: Maybe a }

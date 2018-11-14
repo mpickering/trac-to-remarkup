@@ -41,6 +41,7 @@ data Inline = Bold Inlines
              | Monospaced Type String
              | Link String [String]
              | TracTicketLink Int (Maybe [String])
+             | DifferentialLink Int
              | CommentLink (Maybe Int) Int (Maybe [String])
              | Anchor
              | Image
@@ -97,6 +98,7 @@ inlineNoNL = do
                     , tracTicketLink
                     , bold
                     , italic
+                    , phabLink
                     , link
                     , wikiStyle
                     , monospaced
@@ -151,6 +153,9 @@ number = read <$> some (oneOf "0123456789")
 tracTicketLink :: Parser Inline
 tracTicketLink = 
   try $ TracTicketLink <$> (char '#' *> number) <*> return Nothing
+
+phabLink :: Parser Inline
+phabLink = try $ string "Phab:D" *> (DifferentialLink <$> number)
 
 commentLink :: Parser Inline
 commentLink = commentTicketLink <|> ticketCommentLink

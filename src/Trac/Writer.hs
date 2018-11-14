@@ -3,6 +3,7 @@
 module Trac.Writer where
 
 import Data.List
+import Data.String (IsString, fromString)
 import qualified Data.Text as T
 import Trac.Pretty
 import qualified Data.Map as M
@@ -33,6 +34,7 @@ data Inline = Bold Inlines
                   (Maybe Inlines) -- ^ label
                   Int -- ^ ticket number
                   (Maybe Int) -- ^ comment number
+             | DifferentialLink Int -- ^ Differential number
              | Str String
              | Space
              | ImageLink
@@ -232,9 +234,20 @@ inline (TicketLink mlabel n (Just c)) = do
   let url = "/" <> org <> "/" <> proj <> "/issues/" <> show n <> "#note_" <> show c
   longLink url $ fromMaybe [Str url] mlabel
 
+inline (DifferentialLink d) = pure $ mkDifferentialLink d
+
 inline _ = return $ empty
 
 longLink :: String -> [Inline] -> W Doc
 longLink url label =
   (<>) <$> (brackets <$> inlines label)
        <*> (parens <$> pure (text url))
+
+mkDifferentialLink :: (Semigroup t, IsString t) => Int -> t
+mkDifferentialLink n =
+    "[D" <> fromString (show n) <> "](" <> mkDifferentialUrl n <> ")"
+
+mkDifferentialUrl :: (Semigroup t, IsString t) => Int -> t
+mkDifferentialUrl n =
+    "https://phabricator.haskell.org/D" <> fromString (show n)
+

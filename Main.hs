@@ -52,6 +52,7 @@ import qualified Trac.Web
 import Trac.Db as Trac
 import Trac.Db.Types as Trac
 import Trac.Convert (LookupComment)
+import Trac.Writer (mkDifferentialLink)
 import qualified Trac.Convert
 import Settings
 
@@ -680,10 +681,9 @@ renderTicketNumbers xs = T.intercalate ", " . map toLink $ xs
         T.pack $ "#" ++ show n
 
 renderTicketDifferentials :: [Differential] -> Text
-renderTicketDifferentials diffs = T.intercalate ", " $ map toLink diffs
-  where
-    toLink (Differential n) =
-        T.pack $ "[D"++show n++"](https://phabricator.haskell.org/D"++show n++")"
+renderTicketDifferentials diffs =
+  T.intercalate ", " $
+    map (mkDifferentialLink . getDifferentialNumber) diffs
 
 toPriorityLabel :: Priority -> Labels
 toPriorityLabel p = case p of

@@ -82,6 +82,8 @@ convertInline n cm (R.Link url is) = pure $ WebLink (intersperse Space (map Str 
 convertInline n cm (R.Str s) = pure $ Str s
 convertInline _ _ (R.LineBreak)  = pure LineBreak
 convertInline _ _ (R.Space)      = pure Space
+convertInline _ _ (R.DifferentialLink n) =
+  pure $ DifferentialLink n
 convertInline _ _ (R.TracTicketLink n desc) =
   pure $ TicketLink (fmap (map Str) desc) n Nothing
 convertInline n cm (R.CommentLink mt c mlabel) = do
