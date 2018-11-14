@@ -19,6 +19,7 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.SqlQQ
+import Debug.Trace (trace)
 
 
 deriving instance FromField TicketNumber
@@ -76,16 +77,6 @@ getTicket (TicketNumber t) conn = do
         let findOrig :: FromField a => Text -> a -> IO a
             findOrig field def = fromMaybe def <$> findOrigField field ticketNumber
 
-            parseTicketList :: T.Text -> [TicketNumber]
-            parseTicketList = mapMaybe parseTicketNumber . T.words
-
-            parseTicketNumber :: T.Text -> Maybe TicketNumber
-            parseTicketNumber =
-                either (const Nothing) (Just . TicketNumber . fst) .
-                TR.decimal . T.dropWhile (=='#') . T.strip
-
-            parseDifferentials :: T.Text -> [Differential]
-            parseDifferentials = const [] -- TODO
 
             i = Identity
         ticketSummary <- i <$> findOrig "summary" summary
@@ -105,6 +96,26 @@ getTicket (TicketNumber t) conn = do
         ticketTypeOfFailure <- i . toTypeOfFailure <$> findOrig "failure" ""
         let ticketFields = Fields {..}
         return Ticket {..}
+
+parseTicketList :: T.Text -> [TicketNumber]
+parseTicketList = mapMaybe parseTicketNumber . T.words
+
+parseTicketNumber :: T.Text -> Maybe TicketNumber
+parseTicketNumber =
+    either (const Nothing) (Just . TicketNumber . fst) .
+    TR.decimal . T.dropWhile (=='#') . T.strip
+
+parseDifferentials :: T.Text -> [Differential]
+parseDifferentials = mapMaybe parseDifferential . T.words
+
+parseDifferential :: T.Text -> Maybe Differential
+parseDifferential str = do
+  let stripped1 = T.strip str
+      stripped2 = T.strip . fromMaybe stripped1 $ T.stripSuffix "," stripped1
+      stripped3 = fromMaybe stripped2 $ T.stripPrefix "Phab:" stripped2
+  stripped4 <- T.stripPrefix "D" stripped3
+  either (const Nothing) (Just . Differential . fst) $ TR.decimal stripped4
+
 
 getTickets :: Connection -> IO [Ticket]
 getTickets conn = do
@@ -178,7 +189,7 @@ getTicketChanges conn n mtime = do
   let run = case mtime of
               Nothing ->
                 query conn
-                  [sql|SELECT time, author, field, newvalue
+                  [sql|SELECT time, author, field, oldvalue, newvalue
                        FROM ticket_change
                        WHERE ticket = ?
                        ORDER BY time ASC
@@ -186,7 +197,7 @@ getTicketChanges conn n mtime = do
                   (Only n)
               Just t ->
                 query conn
-                  [sql|SELECT time, author, field, newvalue
+                  [sql|SELECT time, author, field, oldvalue, newvalue
                        FROM ticket_change
                        WHERE ticket = ?
                        AND time = ?
@@ -195,18 +206,45 @@ getTicketChanges conn n mtime = do
                   (n, t)
   map toChange <$> run
   where
-    toChange :: (TracTime, Text, Text, Maybe Text) -> TicketChange
-    toChange (TracTime t, author, field, new) =
+    toChange :: (TracTime, Text, Text, Maybe Text, Maybe Text) -> TicketChange
+    toChange (TracTime t, author, field, old, new) =
         case field of
-          "type"        -> fieldChange $ emptyFields{ticketType = Just $ toTicketType $ expectJust new}
-          "summary"     -> fieldChange $ emptyFields{ticketSummary = Just $ expectJust new}
-          "description" -> fieldChange $ emptyFields{ticketDescription = new}
-          "priority"    -> fieldChange $ emptyFields{ticketPriority = Just $ toPriority $ expectJust new}
-          "status"      -> fieldChange $ emptyFields{ticketStatus = Just $ toStatus $ expectJust new}
+          "type"         -> fieldChange $ emptyFieldsUpdate{ticketType = mkJustUpdate toTicketType old new}
+          "summary"      -> fieldChange $ emptyFieldsUpdate{ticketSummary = mkJustUpdate id old new}
+          "description"  -> fieldChange $ emptyFieldsUpdate{ticketDescription = Update old new}
+          "priority"     -> fieldChange $ emptyFieldsUpdate{ticketPriority = mkJustUpdate toPriority old new}
+          "milestone"    -> fieldChange $ emptyFieldsUpdate{ticketMilestone = mkJustUpdate id old new}
+          "testcase"     -> fieldChange $ emptyFieldsUpdate{ticketTestCase = mkUpdate id old new}
+          "keywords"     -> fieldChange $ emptyFieldsUpdate{ticketKeywords = mkUpdate (fmap T.words) old new}
+          "status"       -> fieldChange $ emptyFieldsUpdate{ticketStatus = mkJustUpdate toStatus old new}
+          "differential" -> fieldChange $ emptyFieldsUpdate{ticketDifferentials = mkUpdate (fmap parseDifferentials) old new}
+          "blocking"     -> fieldChange $ emptyFieldsUpdate{ticketBlocking = mkUpdate (fmap parseTicketList) old new}
+          "blockedby"    -> fieldChange $ emptyFieldsUpdate{ticketBlockedBy = mkUpdate (fmap parseTicketList) old new}
+          "related"      -> fieldChange $ emptyFieldsUpdate{ticketRelated = mkUpdate (fmap parseTicketList) old new}
+
+          -- TODO: The other fields
 
           "comment"     -> empty {changeComment = Just $ expectJust new}
-          _             -> empty
+          _             -> if isSkippableField field
+                              then
+                                 empty
+                              else
+                                 trace ("TICKET FIELD NOT IMPLEMENTED: " ++ show field ++ " = " ++ show new) $
+                                   empty
+
       where
+        isSkippableField :: Text -> Bool
+        isSkippableField "resolution" = True
+        isSkippableField "owner" = True
+        isSkippableField x | "_comment" `T.isPrefixOf` x = True
+        isSkippableField _ = False
+
+        mkJustUpdate :: (a -> b) -> Maybe a -> Maybe a -> Update b
+        mkJustUpdate f = mkUpdate (Just . f . expectJust)
+
+        mkUpdate :: (a -> Maybe b) -> a -> a -> Update b
+        mkUpdate f old new = Update (f old) (f new)
+
         expectJust Nothing = error $ unlines [ "expected Just newvalue:"
                                              , "  t: " <> show t
                                              , "  field: " <> show field
@@ -216,7 +254,7 @@ getTicketChanges conn n mtime = do
 
         empty = TicketChange { changeTime = t
                              , changeAuthor = author
-                             , changeFields = emptyFields
+                             , changeFields = emptyFieldsUpdate
                              , changeComment = Nothing
                              }
         fieldChange flds = empty {changeFields = flds}

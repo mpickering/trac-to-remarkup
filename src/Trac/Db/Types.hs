@@ -2,13 +2,18 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Trac.Db.Types where
 
 import Control.Applicative
 import Data.Functor.Identity
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock
+import Data.Maybe
 
 newtype TracTime = TracTime UTCTime
                  deriving (Eq, Ord, Show)
@@ -86,15 +91,22 @@ hoistFields f Fields{..} =
            , ticketStatus        = f ticketStatus
            }
 
-emptyFields :: Fields Maybe
-emptyFields = Fields
-    Nothing Nothing Nothing
-    Nothing Nothing Nothing
-    Nothing Nothing Nothing
-    Nothing Nothing Nothing
-    Nothing Nothing Nothing
+emptyFieldsOf :: (forall a. f a) -> Fields f
+emptyFieldsOf x = Fields
+    x x x
+    x x x
+    x x x
+    x x x
+    x x x
 
-collapseFields :: Fields Maybe -> Fields Maybe -> Fields Maybe
+emptyFields :: Fields Maybe
+emptyFields = emptyFieldsOf Nothing
+
+emptyFieldsUpdate :: Fields Update
+emptyFieldsUpdate = emptyFieldsOf (Update Nothing Nothing)
+
+
+collapseFields :: Alternative m => Fields m -> Fields m -> Fields m
 collapseFields a b =
     Fields { ticketType = ticketType a <|> ticketType b
            , ticketSummary = ticketSummary a <|> ticketSummary b
@@ -119,9 +131,46 @@ deriving instance Show (Fields Maybe)
 newtype Differential = Differential Integer
                      deriving (Show)
 
+data Update a = Update { oldValue :: Maybe a, newValue :: Maybe a }
+  deriving (Show, Functor)
+
+instance Applicative Update where
+  pure x = Update (pure x) (pure x)
+  Update a b <*> Update c d = Update (a <*> c) (b <*> d)
+
+instance Alternative Update where
+  Update a b <|> Update c d = Update (a <|> c) (b <|> d)
+  empty = Update empty empty
+
+instance Semigroup a => Semigroup (Update a) where
+  Update a b <> Update c d = Update (a <> c) (b <> d)
+
+instance Monoid a => Monoid (Update a) where
+  mempty = Update mempty mempty
+
+class ConcatFields f where
+  concatFields :: f Text -> Maybe Text
+
+instance ConcatFields [] where
+  concatFields [] = Nothing
+  concatFields xs = Just $ T.intercalate ", " xs
+
+instance ConcatFields Maybe where
+  concatFields = id
+
+instance ConcatFields Update where
+  concatFields (Update Nothing Nothing) = Nothing
+  concatFields (Update old new) =
+    Just $ fromMaybe "-" old <> " → " <> fromMaybe "-" new
+
+instance ConcatFields Identity where
+  concatFields (Identity t) = Just t
+
+deriving instance Show (Fields Update)
+
 data TicketChange = TicketChange { changeTime    :: UTCTime
                                  , changeAuthor  :: Text
-                                 , changeFields  :: Fields Maybe
+                                 , changeFields  :: Fields Update
                                  , changeComment :: Maybe Text
                                  }
 

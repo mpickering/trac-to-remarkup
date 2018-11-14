@@ -479,7 +479,7 @@ createTicketChanges milestoneMap getUserId commentCache storeComment iid tc = do
             , ""
             , "(Trac comment: " <> (T.pack . show) commentNumber <> ")"
             , fieldsTable
-                []
+                mempty
                 -- [ ("User", changeAuthor tc) -- ]
                 (changeFields tc)
             ]
@@ -497,7 +497,7 @@ createTicketChanges milestoneMap getUserId commentCache storeComment iid tc = do
       storeComment (unIssueIid iid) (inrId cinResp)
       (M.lookup (unIssueIid iid) <$> readMVar commentCache) >>= print
 
-    let fields = changeFields tc
+    let fields = hoistFields newValue $ changeFields tc
     let status = case ticketStatus fields of
                    Nothing         -> Nothing
                    Just New        -> Just ReopenEvent
@@ -611,9 +611,9 @@ fieldLabels fields =
     failureLbls :: Labels
     failureLbls = maybe mempty typeOfFailureLabels $ ticketTypeOfFailure fields
 
-fieldsTable :: forall f. (Functor f, Foldable f)
+fieldsTable :: forall f. (Functor f, ConcatFields f, Show (Fields f))
             => [(Text, Text)] -> Fields f -> T.Text
-fieldsTable extraRows (Fields{..})
+fieldsTable extraRows (f@Fields{..})
   | null rows = ""
   | otherwise = T.unlines $
     [ "<details><summary>Trac metadata</summary>"
@@ -622,9 +622,6 @@ fieldsTable extraRows (Fields{..})
     , "</details>"
     ]
   where
-    one :: f a -> Maybe a
-    one = listToMaybe . toList
-
     unless :: (a -> Bool) -> Maybe a -> Maybe a
     unless p (Just x) | p x = Nothing
     unless _ x = x
@@ -635,20 +632,21 @@ fieldsTable extraRows (Fields{..})
     rows :: [(Text, Text)]
     rows =
         catMaybes
-        [ row "Version" $ one ticketVersion
-        , row "Type" $ T.pack . show <$> one ticketType
-        , row "TypeOfFailure" $ T.pack . show <$> one ticketTypeOfFailure
-        , row "Priority" $ toPriorityName <$> one ticketPriority
-        , row "Milestone" $ one ticketMilestone
-        , row "Component" $ one ticketComponent
-        , row "Test case" $ unless T.null $ one ticketTestCase
-        , row "Differential revisions" $ one ticketDifferentials >>= renderTicketDifferentials
-        , row "Status" $ T.pack . show <$> one ticketStatus
-        , row "Description" $ const "description changed" <$> one ticketDescription
-        , row "Keywords" $ T.intercalate ", " <$> one ticketKeywords
-        , row "BlockedBy" $ one ticketBlockedBy >>= renderTicketNumbers
-        , row "Related" $ one ticketRelated >>= renderTicketNumbers
-        , row "Blocking" $ one ticketBlocking >>= renderTicketNumbers
+        [ row "Version" $ concatFields ticketVersion
+        , row "Type" $ concatFields $ T.pack . show <$> ticketType
+        , row "TypeOfFailure" $ concatFields $ T.pack . show <$> ticketTypeOfFailure
+        , row "Priority" $ concatFields $ toPriorityName <$> ticketPriority
+        , row "Milestone" $ concatFields ticketMilestone
+        , row "Component" $ concatFields ticketComponent
+        , row "Test case" $ concatFields $ ticketTestCase
+        , row "Differential revisions" $ concatFields $ renderTicketDifferentials <$> ticketDifferentials
+        , row "Status" $ concatFields $ T.pack . show <$> ticketStatus
+        , row "Description" $ concatFields $ const "description changed" <$> concatFields ticketDescription
+        , row "Keywords" $ concatFields $ T.intercalate ", " <$> ticketKeywords
+        , row "BlockedBy" $ concatFields $ renderTicketNumbers <$> ticketBlockedBy
+        , row "Related" $ concatFields $ renderTicketNumbers <$> ticketRelated
+        , row "Blocking" $ concatFields $ renderTicketNumbers <$> ticketBlocking
+        -- , row "ALL" $ Just . T.pack . show $ f
         ] ++ extraRows
 
     formatTicketNumber :: TicketNumber -> Text
@@ -675,16 +673,14 @@ fieldsTable extraRows (Fields{..})
         , " |"
         ]
 
-renderTicketNumbers :: [TicketNumber] -> Maybe Text
-renderTicketNumbers [] = Nothing
-renderTicketNumbers xs = Just . T.intercalate ", " . map toLink $ xs
+renderTicketNumbers :: [TicketNumber] -> Text
+renderTicketNumbers xs = T.intercalate ", " . map toLink $ xs
   where
     toLink (TicketNumber n) =
         T.pack $ "#" ++ show n
 
-renderTicketDifferentials :: [Differential] -> Maybe Text
-renderTicketDifferentials [] = Nothing
-renderTicketDifferentials diffs = Just $ T.intercalate ", " $ map toLink diffs
+renderTicketDifferentials :: [Differential] -> Text
+renderTicketDifferentials diffs = T.intercalate ", " $ map toLink diffs
   where
     toLink (Differential n) =
         T.pack $ "[D"++show n++"](https://phabricator.haskell.org/D"++show n++")"
