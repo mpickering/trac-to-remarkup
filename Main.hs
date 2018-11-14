@@ -144,8 +144,8 @@ main = do
             putStrLn "makeMutations' done"
     makeMutations' mutations
 
-    -- putStrLn "Making attachments"
-    -- runClientM (makeAttachments conn getUserId) env >>= print
+    putStrLn "Making attachments"
+    runClientM (makeAttachments conn getUserId) env >>= print
 
 divide :: Int -> [a] -> [[a]]
 divide n xs = map f [0..n-1]
