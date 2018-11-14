@@ -78,6 +78,7 @@ convertInline n cm (R.Bold is) = Bold <$> convertInlines n cm is
 convertInline n cm (R.Monospaced ty is) = pure (Monospaced ty is)
 convertInline n cm (R.Italic is) = Italic <$> convertInlines n cm is
 convertInline n cm (R.WikiStyle is) = Italic <$> convertInlines n cm is
+convertInline n cm (R.Link url []) = pure $ WebLink (intersperse Space [Str url]) url
 convertInline n cm (R.Link url is) = pure $ WebLink (intersperse Space (map Str is)) url
 convertInline n cm (R.Str s) = pure $ Str s
 convertInline _ _ (R.LineBreak)  = pure LineBreak
