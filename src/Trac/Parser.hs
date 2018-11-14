@@ -111,11 +111,11 @@ inlineNoNL = do
 
 bold = try bold1 <|> try bold2
 bold1 = Bold <$> inlineMarkup 3
-bold2 = Bold <$> try (between (string "**") (string "**") (some inline))
+bold2 = Bold <$> try (between (string "**") (string "**") (some inlineNoNL))
 
 italic = try italic1 <|> italic2
 italic1 = Italic <$> inlineMarkup 2
-italic2 = Italic <$> try (between (string "//") (string "//") (some inline))
+italic2 = Italic <$> try (between (string "//") (string "//") (some inlineNoNL))
 
 wikiStyle = WikiStyle <$> inlineMarkup 5
 
