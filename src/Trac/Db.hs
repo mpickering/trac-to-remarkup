@@ -356,15 +356,17 @@ nullifyTimestamp (Just t@(TracTime u))
 
 getAttachments :: Connection -> IO [Attachment]
 getAttachments conn = do
-    map f <$> query_ conn
+    mapMaybe f <$> query_ conn
         [sql|SELECT type, id, filename, time, description, author, ipnr
              FROM attachment |]
   where
-    f :: (Text, Text, Text, TracTime, Text, Text, Maybe Text) -> Attachment
-    f (typ, rid, aFilename, TracTime aTime, aDescription, aAuthor, aIpAddr) =
-        Attachment {..}
+    f :: (Text, Text, Text, TracTime, Text, Text, Maybe Text) -> Maybe Attachment
+    f (typ, rid, aFilename, TracTime aTime, aDescription, aAuthor, aIpAddr)
+      | Just aResource <- theResource = Just Attachment {..}
+      | otherwise = Nothing
       where
-        aResource = case typ of
-          "ticket" -> TicketAttachment $ TicketNumber $ read $ T.unpack rid
-          "wiki"   -> WikiAttachment $ WikiName rid
+        theResource = case typ of
+          "ticket" -> Just $ TicketAttachment $ TicketNumber $ read $ T.unpack rid
+          "wiki"   -> Just $ WikiAttachment $ WikiName rid
+          "blog"   -> Nothing
           _        -> error $ "Unknown attachment resource type " ++ show typ
