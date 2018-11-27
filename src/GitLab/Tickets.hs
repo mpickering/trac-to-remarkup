@@ -282,6 +282,7 @@ createMilestone tok sudo prj cm = do
 type ListMilestonesAPI =
     GitLabRoot :> "projects"
     :> Capture "id" ProjectId :> "milestones"
+    :> QueryParam "per_page" Int
     :> Get '[JSON] [Milestone]
 
 data Milestone = Milestone Text MilestoneId
@@ -292,4 +293,4 @@ instance FromJSON Milestone where
 
 listMilestones :: AccessToken
                -> ProjectId -> ClientM [Milestone]
-listMilestones tok = client (Proxy :: Proxy ListMilestonesAPI) (Just tok)
+listMilestones tok prj = client (Proxy :: Proxy ListMilestonesAPI) (Just tok) prj (Just 100)
