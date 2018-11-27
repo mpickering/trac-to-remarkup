@@ -9,7 +9,7 @@ module GitLab.Users where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Error
+import Control.Monad.Except
 import qualified Data.Text as T
 import qualified Data.Set as S
 import Data.Text (Text)
