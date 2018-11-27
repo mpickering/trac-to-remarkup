@@ -302,7 +302,7 @@ makeAttachment getUserId (Attachment{..})
         mgr <- manager <$> ask
         content <- liftIO $ Trac.Web.fetchTicketAttachment tracBaseUrl ticketNum aFilename
         uid <- getUserId aAuthor
-        msg <- if ".hs" `T.isSuffixOf` aFilename
+        msg <- if ".hs" `T.isSuffixOf` aFilename && BS.length content < 30000
             then mkSnippet uid ticketNum content
             else mkAttachment uid ticketNum content
         mkComment uid (IssueIid $ fromIntegral $ getTicketNumber ticketNum) msg
