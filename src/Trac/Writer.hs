@@ -10,6 +10,9 @@ import qualified Data.Map as M
 import Control.Monad.Reader
 import Data.Maybe (fromMaybe)
 
+projectBaseUrl :: String
+projectBaseUrl = "https://gitlab.staging.haskell.org/projects/2"
+
 type CommentMap = M.Map (Int, Int) Int
 
 data Context
@@ -231,8 +234,10 @@ inline (TicketLink mlabel n Nothing) = do
 inline (TicketLink mlabel n (Just c)) = do
   org <- asks ctxOrg
   proj <- asks ctxProject
-  let url = "/" <> org <> "/" <> proj <> "/issues/" <> show n <> "#note_" <> show c
-  longLink url $ fromMaybe [Str url] mlabel
+  let url = projectBaseUrl <> "/" <> org <> "/" <> proj <> "/issues/" <> show n <> "#note_" <> show c
+  case mlabel of
+    Just label -> longLink url $ fromMaybe [Str url] mlabel
+    Nothing    -> return $ text url
 
 inline (DifferentialLink d) = pure $ mkDifferentialLink d
 
