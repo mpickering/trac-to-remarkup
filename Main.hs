@@ -483,8 +483,6 @@ createTicketChanges milestoneMap getUserId commentCache storeComment iid tc = do
     rawBody <- liftIO $ tracToMarkdown commentCache t $ fromMaybe "(no text)" $ changeComment tc
     let body = T.unlines
             [ rawBody
-            , ""
-            , "(Trac comment: " <> (T.pack . show) commentNumber <> ")"
             , fieldsTable
                 mempty
                 -- [ ("User", changeAuthor tc) -- ]
